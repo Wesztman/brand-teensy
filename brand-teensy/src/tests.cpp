@@ -1,5 +1,6 @@
 #include "tests.h"
 
+//Simple test for the motor driver. Actives both motor channels in both directions at different speed.
 void motorTest(LOLIN_I2C_MOTOR motor) {
 
   Serial.println("Change A to CCW, B to CW, Freq: 1000Hz");
@@ -63,6 +64,29 @@ void motorTest(LOLIN_I2C_MOTOR motor) {
     Serial.println("MOTOR_STATUS_CW");
     motor.changeStatus(MOTOR_CH_A, MOTOR_STATUS_CW);
     delay(500);
+  }
+
+}
+
+void simpleFollow(LOLIN_I2C_MOTOR motor, int distLeft, int distRight) {
+
+  if (distLeft <= 200 && distRight <= 200 ){
+    motor.changeStatus(MOTOR_CH_A, MOTOR_STATUS_CCW);
+    motor.changeStatus(MOTOR_CH_B, MOTOR_STATUS_CCW);
+    motor.changeDuty(MOTOR_CH_A, 90);
+    motor.changeDuty(MOTOR_CH_B, 90);
+  }else if(distLeft <= 200){
+    motor.changeStatus(MOTOR_CH_A, MOTOR_STATUS_CCW);
+    motor.changeStatus(MOTOR_CH_B, MOTOR_STATUS_CW);
+    motor.changeDuty(MOTOR_CH_A, 90);
+    motor.changeDuty(MOTOR_CH_B, 30);
+  }else if(distRight <= 200){
+    motor.changeStatus(MOTOR_CH_A, MOTOR_STATUS_CW);
+    motor.changeStatus(MOTOR_CH_B, MOTOR_STATUS_CCW);
+    motor.changeDuty(MOTOR_CH_A, 30);
+    motor.changeDuty(MOTOR_CH_B, 90);
+  }else{
+    motor.changeStatus(MOTOR_CH_BOTH, MOTOR_STATUS_STANDBY);
   }
 
 }

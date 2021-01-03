@@ -7,4 +7,6 @@
 
 void motorTest(LOLIN_I2C_MOTOR motor);
 
+void simpleFollow(LOLIN_I2C_MOTOR motor, int distLeft, int distRight);
+
 #endif
