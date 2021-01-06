@@ -22,6 +22,7 @@
 #include "tests.h"
 #include <Adafruit_VL53L0X.h>
 
+
 //=================================================================
 //===                       PIN DEFINITION                     ====
 //=================================================================
@@ -44,10 +45,10 @@ int xShut9 = 26;  // xShut Distance sensor 9
 //===                       SYSTEM DEFINTION                   ====
 //=================================================================
 
-//# Motor Driver #
+//### Motor Driver ###
 LOLIN_I2C_MOTOR motor; //I2C address 0x30
 
-//# Distance Sensors #
+//### Distance Sensors ###
 #define SENSOR1_WIRE Wire
 #define SENSOR2_WIRE Wire
 #define SENSOR3_WIRE Wire
@@ -94,23 +95,23 @@ Adafruit_VL53L0X sensor9;
 // Setup for 9 sensors
 // Set pin 23 as interupt but we wont use interupt
 sensorList_t sensors[] = {
-  {&sensor1, &SENSOR1_WIRE, 0x30, xShut1, 23,
+  {&sensor1, &SENSOR1_WIRE, 0x31, xShut1, 23,
    Adafruit_VL53L0X::VL53L0X_SENSE_DEFAULT, 0, 0},
-  {&sensor2, &SENSOR2_WIRE, 0x31, xShut2, 23,
+  {&sensor2, &SENSOR2_WIRE, 0x32, xShut2, 23,
    Adafruit_VL53L0X::VL53L0X_SENSE_DEFAULT, 0, 0},
-  {&sensor3, &SENSOR3_WIRE, 0x32, xShut3, 23,
+  {&sensor3, &SENSOR3_WIRE, 0x33, xShut3, 23,
    Adafruit_VL53L0X::VL53L0X_SENSE_DEFAULT, 0, 0},
-  {&sensor4, &SENSOR4_WIRE, 0x33, xShut4, 23,
+  {&sensor4, &SENSOR4_WIRE, 0x34, xShut4, 23,
    Adafruit_VL53L0X::VL53L0X_SENSE_DEFAULT, 0, 0},
-  {&sensor5, &SENSOR5_WIRE, 0x34, xShut5, 23,
+  {&sensor5, &SENSOR5_WIRE, 0x35, xShut5, 23,
    Adafruit_VL53L0X::VL53L0X_SENSE_DEFAULT, 0, 0},
-  {&sensor6, &SENSOR6_WIRE, 0x35, xShut6, 23,
+  {&sensor6, &SENSOR6_WIRE, 0x36, xShut6, 23,
    Adafruit_VL53L0X::VL53L0X_SENSE_DEFAULT, 0, 0},
-  {&sensor7, &SENSOR7_WIRE, 0x36, xShut7, 23,
+  {&sensor7, &SENSOR7_WIRE, 0x37, xShut7, 23,
    Adafruit_VL53L0X::VL53L0X_SENSE_DEFAULT, 0, 0},
-  {&sensor8, &SENSOR8_WIRE, 0x37, xShut8, 23,
+  {&sensor8, &SENSOR8_WIRE, 0x38, xShut8, 23,
    Adafruit_VL53L0X::VL53L0X_SENSE_DEFAULT, 0, 0},
-  {&sensor9, &SENSOR9_WIRE, 0x38, xShut9, 23,
+  {&sensor9, &SENSOR9_WIRE, 0x39, xShut9, 23,
    Adafruit_VL53L0X::VL53L0X_SENSE_DEFAULT, 0, 0}
 
 };
@@ -120,6 +121,19 @@ const int COUNT_SENSORS = sizeof(sensors) / sizeof(sensors[0]);
 const uint16_t ALL_SENSORS_PENDING = ((1 << COUNT_SENSORS) - 1);
 uint16_t sensors_pending = ALL_SENSORS_PENDING;
 uint32_t sensor_last_cycle_time;
+
+//### GY-521 IMU ###
+
+const int MPU_ADDR = 0x68; // I2C address of the MPU-6050. If AD0 pin is set to HIGH, the I2C address will be 0x69.
+int16_t accelerometer_x, accelerometer_y, accelerometer_z; // variables for accelerometer raw data
+int16_t gyro_x, gyro_y, gyro_z; // variables for gyro raw data
+int16_t temperature; // variables for temperature data
+char tmp_str[7]; // temporary variable used in convert function
+char* convert_int16_to_str(int16_t i) { // converts int16 to string. Moreover, resulting strings will have the same length in the debug monitor.
+  sprintf(tmp_str, "%6d", i);
+  return tmp_str;
+}
+
 
 
 //=================================================================
@@ -133,6 +147,8 @@ int prevDist1 = 100;  //  stores the old value of ultrasonic sensor 1
 int ultraDist2 = 100; //  stores the value of ultrasonic sensor 2
 int prevDist2 = 100;  //  stores the old value of ultrasonic sensor 2
 
+uint16_t distances_mm[9]; //Stores all ToF distance sensor data
+
 // ================================================================
 // ===                 ---- PROTOTYPES ----                     ===
 // ================================================================
@@ -142,6 +158,8 @@ void read_sensors();
 void start_continuous_range(uint16_t cycle_time);
 void Process_continuous_range();
 void timed_async_read_sensors();
+void readIMU();
+
 
 // ================================================================
 // ===                      INITIAL SETUP                       ===
@@ -151,6 +169,13 @@ void setup()
 {
   Serial.begin(115200);
   Wire.begin();
+
+  //-----Setup GY-521------
+  Wire.beginTransmission(MPU_ADDR); // Begins a transmission to the I2C slave (GY-521 board)
+  Wire.write(0x6B); // PWR_MGMT_1 register
+  Wire.write(0); // set to zero (wakes up the MPU-6050)
+  Wire.endTransmission(true);
+  //-----------------------
   
 /*   while (motor.PRODUCT_ID != PRODUCT_ID_I2C_MOTOR) //wait motor shield ready.
   {
@@ -171,15 +196,14 @@ void setup()
   digitalWrite(13, HIGH);
 
   // initialize all of the pins.
-  Serial.println(F("VL53LOX_multi start, initialize IO pins"));
-  for (int i = 0; i < COUNT_SENSORS; i++) {
+    //VL53LOX_multi start, initialize IO pins
+    for (int i = 0; i < COUNT_SENSORS; i++) {
     pinMode(sensors[i].shutdown_pin, OUTPUT);
     digitalWrite(sensors[i].shutdown_pin, LOW);
 
     if (sensors[i].interrupt_pin >= 0)
       pinMode(sensors[i].interrupt_pin, INPUT_PULLUP);
   }
-  Serial.println(F("Starting..."));
   Initialize_sensors();
 
 }
@@ -212,9 +236,24 @@ void loop()
   simpleFollow(motor, ultraDist1, ultraDist2);
   delay(10);
  */
+
   //read_sensors();
  timed_async_read_sensors();
-  //delay(250);
+
+ readIMU();
+ // print out data
+  Serial.print("aX = "); Serial.print(convert_int16_to_str(accelerometer_x));
+  Serial.print(" | aY = "); Serial.print(convert_int16_to_str(accelerometer_y));
+  Serial.print(" | aZ = "); Serial.print(convert_int16_to_str(accelerometer_z));
+  // the following equation was taken from the documentation [MPU-6000/MPU-6050 Register Map and Description, p.30]
+  Serial.print(" | tmp = "); Serial.print(temperature/340.00+36.53);
+  Serial.print(" | gX = "); Serial.print(convert_int16_to_str(gyro_x));
+  Serial.print(" | gY = "); Serial.print(convert_int16_to_str(gyro_y));
+  Serial.print(" | gZ = "); Serial.print(convert_int16_to_str(gyro_z));
+  Serial.println();
+  
+  // delay
+  //delay(200);
 
 }
 
@@ -405,6 +444,7 @@ void timed_async_read_sensors() {
     ranges_mm[i] = sensors[i].psensor->readRangeResult();
     timeouts[i] = sensors[i].psensor->timeoutOccurred();
     stop_times[i] = millis();
+    distances_mm[i] = ranges_mm[i];
   }
   uint32_t delta_time = millis() - start_time;
   digitalWrite(13, LOW);
@@ -424,4 +464,21 @@ void timed_async_read_sensors() {
     start_time = stop_times[i];
   }
   Serial.println();
+}
+
+void readIMU()
+{
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x3B); // starting with register 0x3B (ACCEL_XOUT_H) [MPU-6000 and MPU-6050 Register Map and Descriptions Revision 4.2, p.40]
+  Wire.endTransmission(false); // the parameter indicates that the Arduino will send a restart. As a result, the connection is kept active.
+  Wire.requestFrom(MPU_ADDR, 7*2, true); // request a total of 7*2=14 registers
+  
+  // "Wire.read()<<8 | Wire.read();" means two registers are read and stored in the same variable
+  accelerometer_x = Wire.read()<<8 | Wire.read(); // reading registers: 0x3B (ACCEL_XOUT_H) and 0x3C (ACCEL_XOUT_L)
+  accelerometer_y = Wire.read()<<8 | Wire.read(); // reading registers: 0x3D (ACCEL_YOUT_H) and 0x3E (ACCEL_YOUT_L)
+  accelerometer_z = Wire.read()<<8 | Wire.read(); // reading registers: 0x3F (ACCEL_ZOUT_H) and 0x40 (ACCEL_ZOUT_L)
+  temperature = Wire.read()<<8 | Wire.read(); // reading registers: 0x41 (TEMP_OUT_H) and 0x42 (TEMP_OUT_L)
+  gyro_x = Wire.read()<<8 | Wire.read(); // reading registers: 0x43 (GYRO_XOUT_H) and 0x44 (GYRO_XOUT_L)
+  gyro_y = Wire.read()<<8 | Wire.read(); // reading registers: 0x45 (GYRO_YOUT_H) and 0x46 (GYRO_YOUT_L)
+  gyro_z = Wire.read()<<8 | Wire.read(); // reading registers: 0x47 (GYRO_ZOUT_H) and 0x48 (GYRO_ZOUT_L)
 }
