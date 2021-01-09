@@ -149,6 +149,32 @@ int prevDist2 = 100;  //  stores the old value of ultrasonic sensor 2
 
 uint16_t distances_mm[9]; //Stores all ToF distance sensor data
 
+//---------GY-521 IMU--------------
+//Acceleration data correction
+int AcXoff = 0; //set when board is in place
+int AcYoff = 0;//set when board is in place
+int AcZoff = 0;//set when board is in place
+
+//Temperature correction
+int toff = 0;
+
+//Gyro correction
+int GyXoff = 480;
+int GyYoff = 0;
+int GyZoff = 150;
+
+float angleZdeg;
+float angleZrad;
+double angleZ;
+float angularRate;
+long deltaT = 0;
+long tLast = 0;
+float gyroGain = 70;    //Value from the LSM6DS33 Datasheet page 15. The gain depends on the angular rate sensitivity. Default 8.75
+float angleZRel;
+float angleZRelDeg;
+//-----------------------------------------------------------
+
+
 // ================================================================
 // ===                 ---- PROTOTYPES ----                     ===
 // ================================================================
@@ -238,7 +264,7 @@ void loop()
  */
 
   //read_sensors();
- timed_async_read_sensors();
+ //timed_async_read_sensors();
 
  readIMU();
  // print out data
@@ -253,7 +279,7 @@ void loop()
   Serial.println();
   
   // delay
-  //delay(200);
+  delay(200);
 
 }
 
@@ -481,4 +507,32 @@ void readIMU()
   gyro_x = Wire.read()<<8 | Wire.read(); // reading registers: 0x43 (GYRO_XOUT_H) and 0x44 (GYRO_XOUT_L)
   gyro_y = Wire.read()<<8 | Wire.read(); // reading registers: 0x45 (GYRO_YOUT_H) and 0x46 (GYRO_YOUT_L)
   gyro_z = Wire.read()<<8 | Wire.read(); // reading registers: 0x47 (GYRO_ZOUT_H) and 0x48 (GYRO_ZOUT_L)
+  gyro_x = gyro_x + GyXoff; //Add correction
+  gyro_y = gyro_y + GyYoff; //Add correction
+  gyro_z = gyro_z + GyZoff; //Add correction
 }
+
+/* float calcAngle(){
+  deltaT = micros() - tLast;
+  tLast = micros();
+  //Negative to make the rotation follow the unit circle
+  angularRate = -1 * gyro_z * gyroGain;
+  angleZ = angleZ + (angularRate * deltaT) / 1000000 - estGyroDrift;
+  angleZRel = angleZRel + (angularRate * deltaT) / 1000000 - estGyroDrift;
+
+  angleZdeg = angleZ / 1000.0;
+  angleZRelDeg = angleZRel / 1000.0;
+
+  //Limits the Angle to between 0-360
+  if (angleZdeg < 0)
+  {
+    angleZdeg = 360 - angleZdeg;
+    angleZ = 360000 - angleZ;
+  }else if (angleZdeg > 360)
+  {
+    angleZdeg = angleZdeg - 360;
+    angleZ = angleZ - 360000;
+  }
+  
+  angleZrad = (angleZdeg *71) / 4068;
+} */
