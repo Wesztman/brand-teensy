@@ -21,6 +21,8 @@
 #include <LOLIN_I2C_MOTOR.h>
 #include "tests.h"
 #include <Adafruit_VL53L0X.h>
+#include <LSM303.h>
+#include <L3G.h>
 
 
 //=================================================================
@@ -122,18 +124,28 @@ const uint16_t ALL_SENSORS_PENDING = ((1 << COUNT_SENSORS) - 1);
 uint16_t sensors_pending = ALL_SENSORS_PENDING;
 uint32_t sensor_last_cycle_time;
 
-//### GY-521 IMU ###
+//### LSM303 L3G IMU ###
 
-const int MPU_ADDR = 0x68; // I2C address of the MPU-6050. If AD0 pin is set to HIGH, the I2C address will be 0x69.
-int16_t accelerometer_x, accelerometer_y, accelerometer_z; // variables for accelerometer raw data
-int16_t gyro_x, gyro_y, gyro_z; // variables for gyro raw data
-int16_t temperature; // variables for temperature data
-char tmp_str[7]; // temporary variable used in convert function
-char* convert_int16_to_str(int16_t i) { // converts int16 to string. Moreover, resulting strings will have the same length in the debug monitor.
-  sprintf(tmp_str, "%6d", i);
-  return tmp_str;
-}
-
+LSM303 compass;
+L3G gyro;
+/*
+  When given no arguments, the heading() function returns the angular
+  difference in the horizontal plane between a default vector and
+  north, in degrees.
+  
+  The default vector is chosen by the library to point along the
+  surface of the PCB, in the direction of the top of the text on the
+  silkscreen. This is the +X axis on the Pololu LSM303D carrier and
+  the -Y axis on the Pololu LSM303DLHC, LSM303DLM, and LSM303DLH
+  carriers.
+  
+  To use a different vector as a reference, use the version of heading()
+  that takes a vector argument; for example, use
+  
+    compass.heading((LSM303::vector<int>){0, 0, 1});
+  
+  to use the +Z axis as a reference.
+  */
 
 
 //=================================================================
@@ -149,19 +161,7 @@ int prevDist2 = 100;  //  stores the old value of ultrasonic sensor 2
 
 uint16_t distances_mm[9]; //Stores all ToF distance sensor data
 
-//---------GY-521 IMU--------------
-//Acceleration data correction
-int AcXoff = 0; //set when board is in place
-int AcYoff = 0;//set when board is in place
-int AcZoff = 0;//set when board is in place
-
-//Temperature correction
-int toff = 0;
-
-//Gyro correction
-int GyXoff = 480;
-int GyYoff = 0;
-int GyZoff = 150;
+//---------LSM303 L3G IMU--------------
 
 float angleZdeg;
 float angleZrad;
@@ -169,9 +169,11 @@ double angleZ;
 float angularRate;
 long deltaT = 0;
 long tLast = 0;
-float gyroGain = 70;    //Value from the LSM6DS33 Datasheet page 15. The gain depends on the angular rate sensitivity. Default 8.75
+float gyroGain = 8.75;    // The gain depends on the angular rate sensitivity. Default 8.75
+float estGyroDrift = -18;  //Is dependent on temperature and how often the angle is calculated
 float angleZRel;
 float angleZRelDeg;
+
 //-----------------------------------------------------------
 
 
@@ -184,7 +186,7 @@ void read_sensors();
 void start_continuous_range(uint16_t cycle_time);
 void Process_continuous_range();
 void timed_async_read_sensors();
-void readIMU();
+void calcAngle();
 
 
 // ================================================================
@@ -196,11 +198,24 @@ void setup()
   Serial.begin(115200);
   Wire.begin();
 
-  //-----Setup GY-521------
-  Wire.beginTransmission(MPU_ADDR); // Begins a transmission to the I2C slave (GY-521 board)
-  Wire.write(0x6B); // PWR_MGMT_1 register
-  Wire.write(0); // set to zero (wakes up the MPU-6050)
-  Wire.endTransmission(true);
+  //-----Setup LSM303 L3G IMU------
+  compass.init();
+  compass.enableDefault();
+
+  if (!gyro.init())
+  {
+    Serial.println("Failed to autodetect gyro type!");
+    while (1);
+  }
+  gyro.enableDefault();
+  
+  /*
+  Calibration values; the default values of +/-32767 for each axis
+  lead to an assumed magnetometer bias of 0. Use the Calibrate example
+  program to determine appropriate values for your particular unit.
+  */
+  compass.m_min = (LSM303::vector<int16_t>){-378, -151, +451};
+  compass.m_max = (LSM303::vector<int16_t>){-26, +193, +477};
   //-----------------------
   
 /*   while (motor.PRODUCT_ID != PRODUCT_ID_I2C_MOTOR) //wait motor shield ready.
@@ -266,20 +281,19 @@ void loop()
   //read_sensors();
  //timed_async_read_sensors();
 
- readIMU();
- // print out data
-  Serial.print("aX = "); Serial.print(convert_int16_to_str(accelerometer_x));
-  Serial.print(" | aY = "); Serial.print(convert_int16_to_str(accelerometer_y));
-  Serial.print(" | aZ = "); Serial.print(convert_int16_to_str(accelerometer_z));
-  // the following equation was taken from the documentation [MPU-6000/MPU-6050 Register Map and Description, p.30]
-  Serial.print(" | tmp = "); Serial.print(temperature/340.00+36.53);
-  Serial.print(" | gX = "); Serial.print(convert_int16_to_str(gyro_x));
-  Serial.print(" | gY = "); Serial.print(convert_int16_to_str(gyro_y));
-  Serial.print(" | gZ = "); Serial.print(convert_int16_to_str(gyro_z));
-  Serial.println();
+  compass.read();
+  gyro.read();
+  float heading = compass.heading();
+  calcAngle();
   
-  // delay
-  delay(200);
+  Serial.print("Heading: ");
+  Serial.print(heading);
+  Serial.print(" Gyro RAW Z: ");
+  Serial.print((int)gyro.g.z);
+  Serial.print(" Vinkel: ");
+  Serial.println(angleZdeg);
+
+  delay(100);
 
 }
 
@@ -492,31 +506,13 @@ void timed_async_read_sensors() {
   Serial.println();
 }
 
-void readIMU()
-{
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x3B); // starting with register 0x3B (ACCEL_XOUT_H) [MPU-6000 and MPU-6050 Register Map and Descriptions Revision 4.2, p.40]
-  Wire.endTransmission(false); // the parameter indicates that the Arduino will send a restart. As a result, the connection is kept active.
-  Wire.requestFrom(MPU_ADDR, 7*2, true); // request a total of 7*2=14 registers
-  
-  // "Wire.read()<<8 | Wire.read();" means two registers are read and stored in the same variable
-  accelerometer_x = Wire.read()<<8 | Wire.read(); // reading registers: 0x3B (ACCEL_XOUT_H) and 0x3C (ACCEL_XOUT_L)
-  accelerometer_y = Wire.read()<<8 | Wire.read(); // reading registers: 0x3D (ACCEL_YOUT_H) and 0x3E (ACCEL_YOUT_L)
-  accelerometer_z = Wire.read()<<8 | Wire.read(); // reading registers: 0x3F (ACCEL_ZOUT_H) and 0x40 (ACCEL_ZOUT_L)
-  temperature = Wire.read()<<8 | Wire.read(); // reading registers: 0x41 (TEMP_OUT_H) and 0x42 (TEMP_OUT_L)
-  gyro_x = Wire.read()<<8 | Wire.read(); // reading registers: 0x43 (GYRO_XOUT_H) and 0x44 (GYRO_XOUT_L)
-  gyro_y = Wire.read()<<8 | Wire.read(); // reading registers: 0x45 (GYRO_YOUT_H) and 0x46 (GYRO_YOUT_L)
-  gyro_z = Wire.read()<<8 | Wire.read(); // reading registers: 0x47 (GYRO_ZOUT_H) and 0x48 (GYRO_ZOUT_L)
-  gyro_x = gyro_x + GyXoff; //Add correction
-  gyro_y = gyro_y + GyYoff; //Add correction
-  gyro_z = gyro_z + GyZoff; //Add correction
-}
 
-/* float calcAngle(){
+ void calcAngle()
+ {
   deltaT = micros() - tLast;
   tLast = micros();
   //Negative to make the rotation follow the unit circle
-  angularRate = -1 * gyro_z * gyroGain;
+  angularRate = -1 * (int)gyro.g.z * gyroGain;
   angleZ = angleZ + (angularRate * deltaT) / 1000000 - estGyroDrift;
   angleZRel = angleZRel + (angularRate * deltaT) / 1000000 - estGyroDrift;
 
@@ -535,4 +531,4 @@ void readIMU()
   }
   
   angleZrad = (angleZdeg *71) / 4068;
-} */
+} 
