@@ -23,6 +23,7 @@
 #include <Adafruit_VL53L0X.h>
 #include <LSM303.h>
 #include <L3G.h>
+#include <Adafruit_AMG88xx.h>
 
 
 //=================================================================
@@ -147,6 +148,11 @@ L3G gyro;
   to use the +Z axis as a reference.
   */
 
+//### AMG8833 IR Camera ###
+
+Adafruit_AMG88xx amg;
+
+float pixels[AMG88xx_PIXEL_ARRAY_SIZE];
 
 //=================================================================
 //===                       VARIABLES                          ====
@@ -187,6 +193,7 @@ void start_continuous_range(uint16_t cycle_time);
 void Process_continuous_range();
 void timed_async_read_sensors();
 void calcAngle();
+void irCameraTest();
 
 
 // ================================================================
@@ -197,11 +204,18 @@ void setup()
 {
   Serial.begin(115200);
   Wire.begin();
+  pinMode(13, OUTPUT);
 
-  //-----Setup LSM303 L3G IMU------
+  // wait until serial port opens ... For 2 seconds max
+  //Used only for debug
+  while (!Serial && millis() < 2000)
+    ;
+
+  
+  //-----Setup LSM303 L3G IMU--------------------
   compass.init();
   compass.enableDefault();
-
+  
   if (!gyro.init())
   {
     Serial.println("Failed to autodetect gyro type!");
@@ -216,36 +230,54 @@ void setup()
   */
   compass.m_min = (LSM303::vector<int16_t>){-378, -151, +451};
   compass.m_max = (LSM303::vector<int16_t>){-26, +193, +477};
-  //-----------------------
+  //---------------------------------
   
+  //------- Setup Motor Driver ------------
 /*   while (motor.PRODUCT_ID != PRODUCT_ID_I2C_MOTOR) //wait motor shield ready.
   {
     motor.getInfo();
   } */
-  motor.changeFreq(MOTOR_CH_BOTH, 1000); //Change A & B 's Frequency to 1000Hz.
- 
+  //motor.changeFreq(MOTOR_CH_BOTH, 1000); //Change A & B 's Frequency to 1000Hz.
+  //-------------------------------------
+  
+  //--------- Setup Ultrasonic Sensor ------------
   pinMode(trigPin1, OUTPUT); // Sets the trigPin as an OUTPUT
   pinMode(echoPin1, INPUT); // Sets the echoPin as an INPUT
   pinMode(trigPin2, OUTPUT); // Sets the trigPin as an OUTPUT
   pinMode(echoPin2, INPUT); // Sets the echoPin as an INPUT
-  
-  // wait until serial port opens ... For 5 seconds max
-  while (!Serial && millis() < 5000)
-    ;
+  //----------------------------------------------
 
-  pinMode(13, OUTPUT);
-  digitalWrite(13, HIGH);
-
+ 
+  /*
+  //-------------- Setup TOF Distance Sensors --------
   // initialize all of the pins.
-    //VL53LOX_multi start, initialize IO pins
-    for (int i = 0; i < COUNT_SENSORS; i++) {
-    pinMode(sensors[i].shutdown_pin, OUTPUT);
-    digitalWrite(sensors[i].shutdown_pin, LOW);
+  //VL53LOX_multi start, initialize IO pins
+  for (int i = 0; i < COUNT_SENSORS; i++) {
+  pinMode(sensors[i].shutdown_pin, OUTPUT);
+  digitalWrite(sensors[i].shutdown_pin, LOW);
 
-    if (sensors[i].interrupt_pin >= 0)
-      pinMode(sensors[i].interrupt_pin, INPUT_PULLUP);
+  if (sensors[i].interrupt_pin >= 0)
+    pinMode(sensors[i].interrupt_pin, INPUT_PULLUP);
   }
   Initialize_sensors();
+  //--------------------------------------------------
+  */
+  
+  
+  //------------Setup AMG8833 IR Camera ----------------
+  bool status;
+  
+  // Soldered the backside of the sensor to get address 0x68 since the gyro had address 0x69
+  status = amg.begin(0x68);
+  if (!status) {
+    Serial.println("Could not find a valid AMG88xx sensor, check wiring!");
+    while (1);
+  }
+  
+  delay(100); // let sensor boot up
+  //----------------------------------------------------------
+  
+  
 
 }
 
@@ -285,6 +317,8 @@ void loop()
   gyro.read();
   float heading = compass.heading();
   calcAngle();
+
+  irCameraTest();
   
   Serial.print("Heading: ");
   Serial.print(heading);
@@ -532,3 +566,21 @@ void timed_async_read_sensors() {
   
   angleZrad = (angleZdeg *71) / 4068;
 } 
+
+void irCameraTest()
+{
+  //read all the pixels
+  amg.readPixels(pixels);
+
+  Serial.print("[");
+  for(int i=1; i<=AMG88xx_PIXEL_ARRAY_SIZE; i++){
+    Serial.print(pixels[i-1]);
+    Serial.print(", ");
+    if( i%8 == 0 ) Serial.println();
+  }
+  Serial.println("]");
+  Serial.println();
+
+  //delay a second
+  delay(500);
+}
