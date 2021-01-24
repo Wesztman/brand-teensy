@@ -24,6 +24,7 @@
 #include <LSM303.h>
 #include <L3G.h>
 #include <Adafruit_AMG88xx.h>
+#include <Encoder.h>
 
 
 //=================================================================
@@ -44,12 +45,21 @@ int xShut7 = 28;  // xShut Distance sensor 7
 int xShut8 = 27;  // xShut Distance sensor 8
 int xShut9 = 26;  // xShut Distance sensor 9
 
+//TEST
+//int testEncoderA = 3;
+//int testEncoderB = 4;
+
+
 //=================================================================
 //===                       SYSTEM DEFINTION                   ====
 //=================================================================
 
 //### Motor Driver ###
 LOLIN_I2C_MOTOR motor; //I2C address 0x30
+
+//### Encoder ###
+//Encoder myEnc(testEncoderA, testEncoderB);
+//long oldPosition  = -999;
 
 //### Distance Sensors ###
 #define SENSOR1_WIRE Wire
@@ -313,6 +323,8 @@ void loop()
   //read_sensors();
  //timed_async_read_sensors();
 
+
+
   compass.read();
   gyro.read();
   float heading = compass.heading();
@@ -329,6 +341,13 @@ void loop()
 
   delay(100);
 
+/*
+long newPosition = myEnc.read();
+  if (newPosition != oldPosition) {
+    oldPosition = newPosition;
+    Serial.println(newPosition);
+  }
+*/
 }
 
 //Triggers Ultrasonic sensor and measures the travel time  of the returning sound wave.
