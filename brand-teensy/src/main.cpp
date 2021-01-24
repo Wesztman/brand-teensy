@@ -243,11 +243,11 @@ void setup()
   //---------------------------------
   
   //------- Setup Motor Driver ------------
-/*   while (motor.PRODUCT_ID != PRODUCT_ID_I2C_MOTOR) //wait motor shield ready.
+  while (motor.PRODUCT_ID != PRODUCT_ID_I2C_MOTOR) //wait motor shield ready.
   {
     motor.getInfo();
-  } */
-  //motor.changeFreq(MOTOR_CH_BOTH, 1000); //Change A & B 's Frequency to 1000Hz.
+  } 
+  motor.changeFreq(MOTOR_CH_BOTH, 1000); //Change A & B 's Frequency to 1000Hz.
   //-------------------------------------
   
   //--------- Setup Ultrasonic Sensor ------------
@@ -258,7 +258,7 @@ void setup()
   //----------------------------------------------
 
  
-  /*
+  
   //-------------- Setup TOF Distance Sensors --------
   // initialize all of the pins.
   //VL53LOX_multi start, initialize IO pins
@@ -271,7 +271,7 @@ void setup()
   }
   Initialize_sensors();
   //--------------------------------------------------
-  */
+  
   
   
   //------------Setup AMG8833 IR Camera ----------------
@@ -316,13 +316,13 @@ void loop()
   prevDist1 = ultraDist1;
   prevDist2 = ultraDist2;
   
-  simpleFollow(motor, ultraDist1, ultraDist2);
+  
   delay(10);
  */
 
   //read_sensors();
- //timed_async_read_sensors();
-
+  timed_async_read_sensors();
+  simpleFollow(motor, distances_mm[3], distances_mm[5]);
 
 
   compass.read();
@@ -601,5 +601,5 @@ void irCameraTest()
   Serial.println();
 
   //delay a second
-  delay(500);
+  delay(200);
 }
