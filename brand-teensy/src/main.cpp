@@ -15,6 +15,8 @@
 //=================================================================
 //===                       LIBRARIES                          ====
 //=================================================================
+//#define USE_USBCON
+//#define USE_TEENSY_HW_SERIAL
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -25,6 +27,8 @@
 #include <L3G.h>
 #include <Adafruit_AMG88xx.h>
 #include <Encoder.h>
+#include "ros.h"
+#include "geometry_msgs/Twist.h"
 
 
 //=================================================================
@@ -164,6 +168,20 @@ Adafruit_AMG88xx amg;
 
 float pixels[AMG88xx_PIXEL_ARRAY_SIZE];
 
+//### ROS ###
+
+float x;
+float z;
+
+ros::NodeHandle nh;
+
+void velCallback( const geometry_msgs::Twist& vel){
+  x = vel.linear.x;
+  z = vel.angular.z;
+}
+
+ros::Subscriber<geometry_msgs::Twist> sub("cmd_vel", velCallback);
+
 //=================================================================
 //===                       VARIABLES                          ====
 //=================================================================
@@ -177,6 +195,8 @@ int prevDist2 = 100;  //  stores the old value of ultrasonic sensor 2
 
 uint16_t distances_mm[9]; //Stores all ToF distance sensor data
 
+unsigned long serialDelay = 100; // Delay in ms between each Serial print.
+unsigned long lastSerial = 0; // Store time of last Serial print
 //---------LSM303 L3G IMU--------------
 
 float angleZdeg;
@@ -204,6 +224,7 @@ void Process_continuous_range();
 void timed_async_read_sensors();
 void calcAngle();
 void irCameraTest();
+void RunMotors(float velocity, float angular);
 
 
 // ================================================================
@@ -212,14 +233,14 @@ void irCameraTest();
 
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(57600);
   Wire.begin();
   pinMode(13, OUTPUT);
 
   // wait until serial port opens ... For 2 seconds max
   //Used only for debug
-  while (!Serial && millis() < 2000)
-    ;
+  //while (!Serial && millis() < 2000)
+  //  ;
 
   
   //-----Setup LSM303 L3G IMU--------------------
@@ -272,8 +293,6 @@ void setup()
   Initialize_sensors();
   //--------------------------------------------------
   
-  
-  
   //------------Setup AMG8833 IR Camera ----------------
   bool status;
   
@@ -287,8 +306,11 @@ void setup()
   delay(100); // let sensor boot up
   //----------------------------------------------------------
   
+  //---------------------- ROS -------------------------------
+  nh.initNode();
+  nh.subscribe(sub);
+  //----------------------------------------------------------
   
-
 }
 
 
@@ -320,26 +342,43 @@ void loop()
   delay(10);
  */
 
-  //read_sensors();
-  timed_async_read_sensors();
-  simpleFollow(motor, distances_mm[3], distances_mm[5]);
+  
+  //timed_async_read_sensors();
+  //simpleFollow(motor, distances_mm[3], distances_mm[5]);
 
-
+/*
   compass.read();
   gyro.read();
   float heading = compass.heading();
   calcAngle();
+*/
 
-  irCameraTest();
-  
-  Serial.print("Heading: ");
-  Serial.print(heading);
-  Serial.print(" Gyro RAW Z: ");
-  Serial.print((int)gyro.g.z);
-  Serial.print(" Vinkel: ");
-  Serial.println(angleZdeg);
+ // irCameraTest();
+  /*
+  if (millis() - lastSerial > serialDelay)
+  {
+    Serial.print("Heading: ");
+    Serial.print(heading);
+    Serial.print(" Gyro RAW Z: ");
+    Serial.print((int)gyro.g.z);
+    Serial.print(" Vinkel: ");
+    Serial.println(angleZdeg);
 
-  delay(100);
+    lastSerial = millis();
+  }
+*/
+  nh.spinOnce();
+
+  if (x > 0)
+  {
+    digitalWrite(13, HIGH);
+  }else if (x < 0)
+  {
+    digitalWrite(13, LOW);
+  }
+  RunMotors(x, z);
+
+  //delay(10);
 
 /*
 long newPosition = myEnc.read();
@@ -524,7 +563,6 @@ void timed_async_read_sensors() {
   bool timeouts[COUNT_SENSORS];
   uint32_t stop_times[COUNT_SENSORS];
 
-  digitalWrite(13, HIGH);
   uint32_t start_time = millis();
 
   // Tell all sensors to start.
@@ -540,8 +578,7 @@ void timed_async_read_sensors() {
     distances_mm[i] = ranges_mm[i];
   }
   uint32_t delta_time = millis() - start_time;
-  digitalWrite(13, LOW);
-
+  
   Serial.print(delta_time, DEC);
   Serial.print(F(" "));
   for (int i = 0; i < COUNT_SENSORS; i++) {
@@ -602,4 +639,23 @@ void irCameraTest()
 
   //delay a second
   delay(200);
+}
+
+void RunMotors(float velocity, float angular){
+  float duty;
+  
+  if (velocity >= 0)
+  {
+    motor.changeStatus(MOTOR_CH_BOTH, MOTOR_STATUS_CCW);
+    duty = map(velocity, 0.0, 2.0, 0.0, 100.0);
+    motor.changeDuty(MOTOR_CH_BOTH, duty);
+  }
+  if (velocity < 0)
+  {
+    motor.changeStatus(MOTOR_CH_BOTH, MOTOR_STATUS_CW);
+
+    duty = map(abs(velocity), 0.0, 2.0, 0.0, 100.0);
+    motor.changeDuty(MOTOR_CH_BOTH, duty);
+  }
+
 }
