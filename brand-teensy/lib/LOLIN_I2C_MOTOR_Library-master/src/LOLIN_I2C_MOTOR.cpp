@@ -5,7 +5,7 @@
 */
 LOLIN_I2C_MOTOR::LOLIN_I2C_MOTOR(uint8_t address)
 {
-	Wire2.begin();
+	Wire1.begin();
 	_address = address;
 }
 
@@ -145,22 +145,22 @@ unsigned char LOLIN_I2C_MOTOR::sendData(unsigned char *data, unsigned char len)
 	else
 	{
 
-		Wire2.beginTransmission(_address);
+		Wire1.beginTransmission(_address);
 		for (i = 0; i < len; i++)
-			Wire2.write(data[i]);
-		Wire2.endTransmission();
+			Wire1.write(data[i]);
+		Wire1.endTransmission();
 		//delay(50); //Doesn't seem to need delay
 
 		if (data[0] == GET_SLAVE_STATUS)
-			Wire2.requestFrom(_address, 2);
+			Wire1.requestFrom(_address, 2);
 		else
-			Wire2.requestFrom(_address, 1);
+			Wire1.requestFrom(_address, 1);
 
 		i = 0;
 
-		while (Wire2.available())
+		while (Wire1.available())
 		{
-			get_data[i] = Wire2.read();
+			get_data[i] = Wire1.read();
 			i++;
 		}
 

@@ -1,6 +1,7 @@
 #include "tests.h"
 
-//Simple test for the motor driver. Actives both motor channels in both directions at different speed.
+//Simple test for the motor driver.
+//Actives both motor channels in both directions at different speed.
 void motorTest(LOLIN_I2C_MOTOR motor) {
 
   Serial.println("Change A to CCW, B to CW, Freq: 1000Hz");
@@ -89,4 +90,12 @@ void simpleFollow(LOLIN_I2C_MOTOR motor, int distLeft, int distRight) {
     motor.changeStatus(MOTOR_CH_BOTH, MOTOR_STATUS_STANDBY);
   }
 
+}
+
+//Blinks the onboard LED on Teensy
+void blinkTest() {
+  digitalWrite(13, HIGH);
+  delay(1000);
+  digitalWrite(13, LOW);
+  delay(1000);
 }

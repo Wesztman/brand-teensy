@@ -15,8 +15,6 @@
 //=================================================================
 //===                       LIBRARIES                          ====
 //=================================================================
-//#define USE_USBCON
-//#define USE_TEENSY_HW_SERIAL
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -35,10 +33,8 @@
 //===                       PIN DEFINITION                     ====
 //=================================================================
 
-int echoPin1 = 34; // Echo of HC-SR04 Left
-int trigPin1 = 33; // Trig of HC-SR04 Left
-int echoPin2 = 32; // Echo of HC-SR04 Right
-int trigPin2 = 31; // Trig of HC-SR04 Right
+int echoPin = 34; // Echo of HC-SR04 
+int trigPin = 33; // Trig of HC-SR04 
 int xShut1 = 14;  // xShut Distance sensor 1
 int xShut2 = 39;  // xShut Distance sensor 2
 int xShut3 = 36;  // xShut Distance sensor 3
@@ -48,10 +44,10 @@ int xShut6 = 29;  // xShut Distance sensor 6
 int xShut7 = 28;  // xShut Distance sensor 7
 int xShut8 = 27;  // xShut Distance sensor 8
 int xShut9 = 26;  // xShut Distance sensor 9
-
-//TEST
-//int testEncoderA = 3;
-//int testEncoderB = 4;
+int ENC_A1 = 6;   // Right encoder A-channel
+int ENC_B1 = 7;   // Right encoder B-channel
+int ENC_A2 = 8;   // Left encoder A-channel
+int ENC_B2 = 9;   // Left encoder B-channel
 
 
 //=================================================================
@@ -62,7 +58,8 @@ int xShut9 = 26;  // xShut Distance sensor 9
 LOLIN_I2C_MOTOR motor; //I2C address 0x30
 
 //### Encoder ###
-//Encoder myEnc(testEncoderA, testEncoderB);
+Encoder RightEnc(ENC_A1, ENC_B1);
+Encoder LeftEnc(ENC_A2, ENC_B2);
 //long oldPosition  = -999;
 
 //### Distance Sensors ###
@@ -169,7 +166,7 @@ Adafruit_AMG88xx amg;
 float pixels[AMG88xx_PIXEL_ARRAY_SIZE];
 
 //### ROS ###
-
+/*
 float x;
 float z;
 
@@ -181,24 +178,22 @@ void velCallback( const geometry_msgs::Twist& vel){
 }
 
 ros::Subscriber<geometry_msgs::Twist> sub("cmd_vel", velCallback);
-
+*/
 //=================================================================
 //===                       VARIABLES                          ====
 //=================================================================
 
 float duration; // variable for the duration of sound wave travel
 float distance; // variable for the distance measurement
-int ultraDist1 = 100; //  stores the value of ultrasonic sensor 1
-int prevDist1 = 100;  //  stores the old value of ultrasonic sensor 1
-int ultraDist2 = 100; //  stores the value of ultrasonic sensor 2
-int prevDist2 = 100;  //  stores the old value of ultrasonic sensor 2
+int ultraDist = 100; //  stores the value of ultrasonic sensor
+int prevUltraDist = 100;  //  stores the old value of ultrasonic sensor
 
 uint16_t distances_mm[9]; //Stores all ToF distance sensor data
 
 unsigned long serialDelay = 100; // Delay in ms between each Serial print.
 unsigned long lastSerial = 0; // Store time of last Serial print
-//---------LSM303 L3G IMU--------------
 
+//---------LSM303 L3G IMU--------------
 float angleZdeg;
 float angleZrad;
 double angleZ;
@@ -233,16 +228,12 @@ void RunMotors(float velocity, float angular);
 
 void setup()
 {
-  Serial.begin(57600);
+  Serial.begin(115200);
+  Serial1.begin(57600);
   Wire.begin();
   pinMode(13, OUTPUT);
 
-  // wait until serial port opens ... For 2 seconds max
-  //Used only for debug
-  //while (!Serial && millis() < 2000)
-  //  ;
-
-  
+ 
   //-----Setup LSM303 L3G IMU--------------------
   compass.init();
   compass.enableDefault();
@@ -272,13 +263,9 @@ void setup()
   //-------------------------------------
   
   //--------- Setup Ultrasonic Sensor ------------
-  pinMode(trigPin1, OUTPUT); // Sets the trigPin as an OUTPUT
-  pinMode(echoPin1, INPUT); // Sets the echoPin as an INPUT
-  pinMode(trigPin2, OUTPUT); // Sets the trigPin as an OUTPUT
-  pinMode(echoPin2, INPUT); // Sets the echoPin as an INPUT
+  pinMode(trigPin, OUTPUT); // Sets the trigPin as an OUTPUT
+  pinMode(echoPin, INPUT); // Sets the echoPin as an INPUT
   //----------------------------------------------
-
- 
   
   //-------------- Setup TOF Distance Sensors --------
   // initialize all of the pins.
@@ -293,6 +280,8 @@ void setup()
   Initialize_sensors();
   //--------------------------------------------------
   
+
+  /*
   //------------Setup AMG8833 IR Camera ----------------
   bool status;
   
@@ -305,10 +294,13 @@ void setup()
   
   delay(100); // let sensor boot up
   //----------------------------------------------------------
-  
+  */
+
   //---------------------- ROS -------------------------------
+  /*
   nh.initNode();
   nh.subscribe(sub);
+  */
   //----------------------------------------------------------
   
 }
@@ -322,41 +314,34 @@ void loop()
 {
 
   //motorTest(motor);
+  //blinkTest();
+  // irCameraTest();
 
-  /* ultraDist1 = readUltraDist(trigPin1, echoPin1);
-  ultraDist2 = readUltraDist(trigPin2, echoPin2);  
-  Serial.print(ultraDist1);
-  Serial.print(" ");
-  Serial.println(ultraDist2);
-
-  if(ultraDist1 == 0){
-    ultraDist1 = prevDist1;
+  ultraDist = readUltraDist(trigPin, echoPin);  
+  if(ultraDist == 0){
+    ultraDist = prevUltraDist;
   }
-  if(ultraDist2 == 0){
-    ultraDist2 = prevDist2;
-  }
-  prevDist1 = ultraDist1;
-  prevDist2 = ultraDist2;
-  
-  
-  delay(10);
- */
+  prevUltraDist = ultraDist;
 
+  if (millis() - lastSerial > serialDelay)
+  {
+    
+
+    lastSerial = millis();
+  }
   
   //timed_async_read_sensors();
   //simpleFollow(motor, distances_mm[3], distances_mm[5]);
 
-/*
+
   compass.read();
   gyro.read();
   float heading = compass.heading();
   calcAngle();
-*/
-
- // irCameraTest();
-  /*
+ 
   if (millis() - lastSerial > serialDelay)
   {
+    //Serial.println(ultraDist);
     Serial.print("Heading: ");
     Serial.print(heading);
     Serial.print(" Gyro RAW Z: ");
@@ -366,7 +351,9 @@ void loop()
 
     lastSerial = millis();
   }
-*/
+
+
+/*
   nh.spinOnce();
 
   if (x > 0)
@@ -377,7 +364,7 @@ void loop()
     digitalWrite(13, LOW);
   }
   RunMotors(x, z);
-
+*/
   //delay(10);
 
 /*
@@ -389,9 +376,13 @@ long newPosition = myEnc.read();
 */
 }
 
-//Triggers Ultrasonic sensor and measures the travel time  of the returning sound wave.
-//Returns the distance in mm.
-//Input: triggerpin and echopin for the sensor
+/*
+Triggers Ultrasonic sensor and measures the travel time  of the returning sound wave.
+Returns the distance in mm. Min 20mm, Max 2000mm.
+Returns 0 if no pulse is found.
+Max can be increased to 4000 if timeout is increased.
+Input: triggerpin and echopin for the sensor
+*/
 int readUltraDist(int trig, int echo){
    // Clears the trigPin condition
   digitalWrite(trig, LOW);

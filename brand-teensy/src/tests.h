@@ -5,8 +5,13 @@
 #include <Wire.h>
 #include <LOLIN_I2C_MOTOR.h>
 
+//Simple test for the motor driver.
+//Actives both motor channels in both directions at different speed.
 void motorTest(LOLIN_I2C_MOTOR motor);
 
 void simpleFollow(LOLIN_I2C_MOTOR motor, int distLeft, int distRight);
+
+//Blinks the onboard LED on Teensy
+void blinkTest();
 
 #endif
