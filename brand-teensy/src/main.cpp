@@ -27,6 +27,7 @@
 #include <Encoder.h>
 #include "ros.h"
 #include "geometry_msgs/Twist.h"
+#include "brandsensor.h"
 
 
 //=================================================================
@@ -60,7 +61,6 @@ LOLIN_I2C_MOTOR motor; //I2C address 0x30
 //### Encoder ###
 Encoder RightEnc(ENC_A1, ENC_B1);
 Encoder LeftEnc(ENC_A2, ENC_B2);
-//long oldPosition  = -999;
 
 //### Distance Sensors ###
 #define SENSOR1_WIRE Wire
@@ -183,15 +183,18 @@ ros::Subscriber<geometry_msgs::Twist> sub("cmd_vel", velCallback);
 //===                       VARIABLES                          ====
 //=================================================================
 
-float duration; // variable for the duration of sound wave travel
-float distance; // variable for the distance measurement
+
 int ultraDist = 100; //  stores the value of ultrasonic sensor
-int prevUltraDist = 100;  //  stores the old value of ultrasonic sensor
 
 uint16_t distances_mm[9]; //Stores all ToF distance sensor data
 
 unsigned long serialDelay = 100; // Delay in ms between each Serial print.
 unsigned long lastSerial = 0; // Store time of last Serial print
+
+long rightEncPos;
+long oldRightEncPos = -999;
+long leftEncPos;
+long oldLeftEncPos = -999;
 
 //---------LSM303 L3G IMU--------------
 float angleZdeg;
@@ -280,8 +283,7 @@ void setup()
   Initialize_sensors();
   //--------------------------------------------------
   
-
-  /*
+  
   //------------Setup AMG8833 IR Camera ----------------
   bool status;
   
@@ -294,7 +296,7 @@ void setup()
   
   delay(100); // let sensor boot up
   //----------------------------------------------------------
-  */
+  
 
   //---------------------- ROS -------------------------------
   /*
@@ -315,42 +317,42 @@ void loop()
 
   //motorTest(motor);
   //blinkTest();
-  // irCameraTest();
-
-  ultraDist = readUltraDist(trigPin, echoPin);  
-  if(ultraDist == 0){
-    ultraDist = prevUltraDist;
-  }
-  prevUltraDist = ultraDist;
-
-  if (millis() - lastSerial > serialDelay)
-  {
-    
-
-    lastSerial = millis();
-  }
+  //amg.readPixels(pixels);
   
+  ultraDist = readUltraDist(trigPin, echoPin);  
+
   //timed_async_read_sensors();
   //simpleFollow(motor, distances_mm[3], distances_mm[5]);
-
 
   compass.read();
   gyro.read();
   float heading = compass.heading();
   calcAngle();
- 
-  if (millis() - lastSerial > serialDelay)
-  {
-    //Serial.println(ultraDist);
-    Serial.print("Heading: ");
-    Serial.print(heading);
-    Serial.print(" Gyro RAW Z: ");
-    Serial.print((int)gyro.g.z);
-    Serial.print(" Vinkel: ");
-    Serial.println(angleZdeg);
+
+  rightEncPos = RightEnc.read();
+  leftEncPos = LeftEnc.read();
+  if (rightEncPos != oldRightEncPos || leftEncPos != oldLeftEncPos){
+    oldRightEncPos = rightEncPos;
+    oldLeftEncPos = leftEncPos;
+  }
+  
+   if (millis() - lastSerial > serialDelay)
+   {
+  //   Serial.print(ultraDist);
+  //   Serial.print("Heading: ");
+  //   Serial.print(heading);
+  //   Serial.print(" Gyro RAW Z: ");
+  //   Serial.print((int)gyro.g.z);
+  //   Serial.print(" Vinkel: ");
+  //   Serial.println(angleZdeg);
+    //printIRCamera(pixels);
+    Serial.print(rightEncPos);
+    Serial.print(" ");
+    Serial.println(leftEncPos);
+    
 
     lastSerial = millis();
-  }
+   }
 
 
 /*
@@ -383,6 +385,7 @@ Returns 0 if no pulse is found.
 Max can be increased to 4000 if timeout is increased.
 Input: triggerpin and echopin for the sensor
 */
+/*
 int readUltraDist(int trig, int echo){
    // Clears the trigPin condition
   digitalWrite(trig, LOW);
@@ -398,7 +401,7 @@ int readUltraDist(int trig, int echo){
   // Return distance
  return (int)distance;
 }
-
+*/
 /*
     Reset all sensors by setting all of their XSHUT pins low for delay(10), then
    set all XSHUT high to bring out of reset
@@ -568,8 +571,8 @@ void timed_async_read_sensors() {
     stop_times[i] = millis();
     distances_mm[i] = ranges_mm[i];
   }
+ 
   uint32_t delta_time = millis() - start_time;
-  
   Serial.print(delta_time, DEC);
   Serial.print(F(" "));
   for (int i = 0; i < COUNT_SENSORS; i++) {
@@ -613,24 +616,6 @@ void timed_async_read_sensors() {
   
   angleZrad = (angleZdeg *71) / 4068;
 } 
-
-void irCameraTest()
-{
-  //read all the pixels
-  amg.readPixels(pixels);
-
-  Serial.print("[");
-  for(int i=1; i<=AMG88xx_PIXEL_ARRAY_SIZE; i++){
-    Serial.print(pixels[i-1]);
-    Serial.print(", ");
-    if( i%8 == 0 ) Serial.println();
-  }
-  Serial.println("]");
-  Serial.println();
-
-  //delay a second
-  delay(200);
-}
 
 void RunMotors(float velocity, float angular){
   float duty;
