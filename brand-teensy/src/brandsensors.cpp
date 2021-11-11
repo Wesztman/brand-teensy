@@ -42,4 +42,10 @@ void printIRCamera(float pixels[]){
   }
   Serial.println("]");
   Serial.println();
-  }
+}
+
+//Return value from line sensor 0-1024
+int readLineSensor(int linePin){
+     int lineValue = analogRead(linePin);
+     return lineValue;
+}

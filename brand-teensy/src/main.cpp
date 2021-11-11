@@ -49,7 +49,8 @@ int ENC_A1 = 6;   // Right encoder A-channel
 int ENC_B1 = 7;   // Right encoder B-channel
 int ENC_A2 = 8;   // Left encoder A-channel
 int ENC_B2 = 9;   // Left encoder B-channel
-
+int leftLine = A12; // Left Line sensor
+int Rightline = A13; // Right Line sensor
 
 //=================================================================
 //===                       SYSTEM DEFINTION                   ====
@@ -196,6 +197,10 @@ long oldRightEncPos = -999;
 long leftEncPos;
 long oldLeftEncPos = -999;
 
+int leftLineValue = 0;
+int rightLineValue = 0;
+
+
 //---------LSM303 L3G IMU--------------
 float angleZdeg;
 float angleZrad;
@@ -335,8 +340,11 @@ void loop()
     oldRightEncPos = rightEncPos;
     oldLeftEncPos = leftEncPos;
   }
+
+  leftLineValue = readLineSensor(leftLine);
+  rightLineValue = readLineSensor(Rightline);
   
-   if (millis() - lastSerial > serialDelay)
+  if (millis() - lastSerial > serialDelay)
    {
   //   Serial.print(ultraDist);
   //   Serial.print("Heading: ");
@@ -346,9 +354,9 @@ void loop()
   //   Serial.print(" Vinkel: ");
   //   Serial.println(angleZdeg);
     //printIRCamera(pixels);
-    Serial.print(rightEncPos);
+    Serial.print(leftLineValue);
     Serial.print(" ");
-    Serial.println(leftEncPos);
+    Serial.println(rightLineValue);
     
 
     lastSerial = millis();

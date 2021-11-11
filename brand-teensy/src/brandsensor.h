@@ -17,5 +17,8 @@ int readUltraDist(int trig, int echo);
 //Serial prints pixel values from IR Camera
 void printIRCamera(float pixels[]);
 
+//Return value from line sensor 0-1024
+int readLineSensor(int linePin);
+
 
 #endif
