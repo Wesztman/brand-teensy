@@ -25,9 +25,12 @@
 #include <L3G.h>
 #include <Adafruit_AMG88xx.h>
 #include <Encoder.h>
+#include "brandsensor.h"
+
 #include "ros.h"
 #include "geometry_msgs/Twist.h"
-#include "brandsensor.h"
+#include "sensor_msgs/Range.h"
+#include "std_msgs/String.h"
 
 
 //=================================================================
@@ -167,9 +170,9 @@ Adafruit_AMG88xx amg;
 float pixels[AMG88xx_PIXEL_ARRAY_SIZE];
 
 //### ROS ###
-/*
-float x;
-float z;
+
+float x;  //Linear velocity
+float z;  //angular velocity
 
 ros::NodeHandle nh;
 
@@ -178,8 +181,11 @@ void velCallback( const geometry_msgs::Twist& vel){
   z = vel.angular.z;
 }
 
-ros::Subscriber<geometry_msgs::Twist> sub("cmd_vel", velCallback);
-*/
+//sensor_msgs::Range
+//std_msgs::String test_msg;
+//ros::Publisher test_topic("test", &test_msg);
+ros::Subscriber<geometry_msgs::Twist> drive("cmd_vel", velCallback);
+
 //=================================================================
 //===                       VARIABLES                          ====
 //=================================================================
@@ -236,7 +242,7 @@ void RunMotors(float velocity, float angular);
 
 void setup()
 {
-  Serial.begin(115200);
+  //Serial.begin(115200);
   Serial1.begin(57600);
   Wire.begin();
   pinMode(13, OUTPUT);
@@ -248,7 +254,7 @@ void setup()
   
   if (!gyro.init())
   {
-    Serial.println("Failed to autodetect gyro type!");
+   // Serial.println("Failed to autodetect gyro type!");
     while (1);
   }
   gyro.enableDefault();
@@ -295,7 +301,7 @@ void setup()
   // Soldered the backside of the sensor to get address 0x68 since the gyro had address 0x69
   status = amg.begin(0x68);
   if (!status) {
-    Serial.println("Could not find a valid AMG88xx sensor, check wiring!");
+    //Serial.println("Could not find a valid AMG88xx sensor, check wiring!");
     while (1);
   }
   
@@ -304,10 +310,11 @@ void setup()
   
 
   //---------------------- ROS -------------------------------
-  /*
+  
   nh.initNode();
-  nh.subscribe(sub);
-  */
+  //nh.advertise(test_topic);
+  nh.subscribe(drive);
+  
   //----------------------------------------------------------
   
 }
@@ -319,7 +326,7 @@ void setup()
 
 void loop()
 {
-
+  nh.spinOnce();
   //motorTest(motor);
   //blinkTest();
   //amg.readPixels(pixels);
@@ -344,6 +351,7 @@ void loop()
   leftLineValue = readLineSensor(leftLine);
   rightLineValue = readLineSensor(Rightline);
   
+  /*
   if (millis() - lastSerial > serialDelay)
    {
   //   Serial.print(ultraDist);
@@ -360,11 +368,11 @@ void loop()
     
 
     lastSerial = millis();
-   }
+  }
+*/
 
-
-/*
-  nh.spinOnce();
+  //test_msg.data ="hej hej";
+  //test_topic.publish(&test_msg);
 
   if (x > 0)
   {
@@ -374,7 +382,7 @@ void loop()
     digitalWrite(13, LOW);
   }
   RunMotors(x, z);
-*/
+
   //delay(10);
 
 /*
@@ -384,6 +392,9 @@ long newPosition = myEnc.read();
     Serial.println(newPosition);
   }
 */
+
+
+  
 }
 
 /*
@@ -467,6 +478,7 @@ void read_sensors() {
   uint32_t delta_time = millis() - start_time;
   digitalWrite(13, LOW);
 
+/*
   Serial.print(delta_time, DEC);
   Serial.print(F(" "));
   for (int i = 0; i < COUNT_SENSORS; i++) {
@@ -482,6 +494,7 @@ void read_sensors() {
     start_time = stop_times[i];
   }
   Serial.println();
+  */
 }
 
 //===============================================================
@@ -491,8 +504,8 @@ void read_sensors() {
 void start_continuous_range(uint16_t cycle_time) {
   if (cycle_time == 0)
     cycle_time = 100;
-  Serial.print(F("start Continuous range mode cycle time: "));
-  Serial.println(cycle_time, DEC);
+  //Serial.print(F("start Continuous range mode cycle time: "));
+  //Serial.println(cycle_time, DEC);
   for (uint8_t i = 0; i < COUNT_SENSORS; i++) {
     sensors[i].psensor->startRangeContinuous(cycle_time); // do 100ms cycle
   }
@@ -501,7 +514,7 @@ void start_continuous_range(uint16_t cycle_time) {
 }
 
 void stop_continuous_range() {
-  Serial.println(F("Stop Continuous range mode"));
+  //Serial.println(F("Stop Continuous range mode"));
   for (uint8_t i = 0; i < COUNT_SENSORS; i++) {
     sensors[i].psensor->stopRangeContinuous();
   }
@@ -527,6 +540,7 @@ void Process_continuous_range() {
     mask <<= 1; // setup to test next one
   }
   // See if we have all of our sensors read OK
+  /*
   uint32_t delta_time = millis() - sensor_last_cycle_time;
   if (!sensors_pending || (delta_time > 1000)) {
     digitalWrite(13, !digitalRead(13));
@@ -554,6 +568,7 @@ void Process_continuous_range() {
     sensor_last_cycle_time = millis();
     sensors_pending = ALL_SENSORS_PENDING;
   }
+  */
 }
 
 //====================================================================
@@ -580,6 +595,7 @@ void timed_async_read_sensors() {
     distances_mm[i] = ranges_mm[i];
   }
  
+ /*
   uint32_t delta_time = millis() - start_time;
   Serial.print(delta_time, DEC);
   Serial.print(F(" "));
@@ -596,6 +612,7 @@ void timed_async_read_sensors() {
     start_time = stop_times[i];
   }
   Serial.println();
+  */
 }
 
 
