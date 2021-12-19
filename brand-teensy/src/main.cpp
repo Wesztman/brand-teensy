@@ -26,6 +26,7 @@
 #include <Adafruit_AMG88xx.h>
 #include <Encoder.h>
 #include "brandsensor.h"
+#include <PID_OP.h>
 
 #include "ros.h"
 #include "geometry_msgs/Twist.h"
@@ -181,9 +182,11 @@ void velCallback( const geometry_msgs::Twist& vel){
   z = vel.angular.z;
 }
 
-//sensor_msgs::Range
 //std_msgs::String test_msg;
 //ros::Publisher test_topic("test", &test_msg);
+sensor_msgs::Range VL53L0X_1;
+
+
 ros::Subscriber<geometry_msgs::Twist> drive("cmd_vel", velCallback);
 
 //=================================================================
@@ -198,10 +201,17 @@ uint16_t distances_mm[9]; //Stores all ToF distance sensor data
 unsigned long serialDelay = 100; // Delay in ms between each Serial print.
 unsigned long lastSerial = 0; // Store time of last Serial print
 
-long rightEncPos;
-long oldRightEncPos = -999;
-long leftEncPos;
-long oldLeftEncPos = -999;
+long rightEncPos = 0;
+long oldRightEncPos = 0; //old -999
+long rightEncTime = 0;
+long rightEncStartTime = 0;
+float rightEncPulsesPerSec = 0;
+long leftEncPos = 0;
+long oldLeftEncPos = 0; //old -999
+long leftEncTime = 0;
+long leftEncStartTime = 0;
+float leftEncPulsesPerSec = 0;
+
 
 int leftLineValue = 0;
 int rightLineValue = 0;
@@ -343,6 +353,16 @@ void loop()
 
   rightEncPos = RightEnc.read();
   leftEncPos = LeftEnc.read();
+  if (rightEncPos != oldRightEncPos){
+    rightEncTime = micros() - rightEncStartTime;
+    rightEncStartTime = micros();
+    rightEncPulsesPerSec = 1000000.0 / rightEncTime;
+  }
+  if (leftEncPos != oldLeftEncPos){
+    leftEncTime = micros() - leftEncStartTime;
+    leftEncStartTime = micros();
+    leftEncPulsesPerSec = 1000000.0 / leftEncTime;
+  }
   if (rightEncPos != oldRightEncPos || leftEncPos != oldLeftEncPos){
     oldRightEncPos = rightEncPos;
     oldLeftEncPos = leftEncPos;
@@ -351,7 +371,7 @@ void loop()
   leftLineValue = readLineSensor(leftLine);
   rightLineValue = readLineSensor(Rightline);
   
-  /*
+  
   if (millis() - lastSerial > serialDelay)
    {
   //   Serial.print(ultraDist);
@@ -362,14 +382,22 @@ void loop()
   //   Serial.print(" Vinkel: ");
   //   Serial.println(angleZdeg);
     //printIRCamera(pixels);
-    Serial.print(leftLineValue);
-    Serial.print(" ");
-    Serial.println(rightLineValue);
+    //Serial.print(leftLineValue);
+   // Serial.print(" ");
+   // Serial.println(rightLineValue);
+   Serial.print("Right: ");
+   Serial.print(rightEncPos);
+   Serial.print(" Left: ");
+   Serial.print(leftEncPos);
+   Serial.print(" Right p/s: ");
+   Serial.print(rightEncPulsesPerSec);
+   Serial.print(" Left p/s: ");
+   Serial.println(leftEncPulsesPerSec);
     
 
     lastSerial = millis();
   }
-*/
+  
 
   //test_msg.data ="hej hej";
   //test_topic.publish(&test_msg);
@@ -381,46 +409,29 @@ void loop()
   {
     digitalWrite(13, LOW);
   }
+
+  //###TEST###
+  x = 0.30;
+  
+  //#########
+
   RunMotors(x, z);
 
   //delay(10);
 
-/*
-long newPosition = myEnc.read();
+  /*
+  long newPosition = myEnc.read();
   if (newPosition != oldPosition) {
     oldPosition = newPosition;
     Serial.println(newPosition);
   }
-*/
+  */
 
 
   
 }
 
-/*
-Triggers Ultrasonic sensor and measures the travel time  of the returning sound wave.
-Returns the distance in mm. Min 20mm, Max 2000mm.
-Returns 0 if no pulse is found.
-Max can be increased to 4000 if timeout is increased.
-Input: triggerpin and echopin for the sensor
-*/
-/*
-int readUltraDist(int trig, int echo){
-   // Clears the trigPin condition
-  digitalWrite(trig, LOW);
-  delayMicroseconds(2);
-  // Sets the trigPin HIGH (ACTIVE) for 10 microseconds
-  digitalWrite(trig, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trig, LOW);
-  // Reads the echoPin, returns the sound wave travel time in microseconds
-  duration = pulseIn(echo, HIGH, 11600);
-  // Calculating the distance
-  distance = duration * 0.343 / 2; // Speed of sound wave divided by 2 (go and back)
-  // Return distance
- return (int)distance;
-}
-*/
+
 /*
     Reset all sensors by setting all of their XSHUT pins low for delay(10), then
    set all XSHUT high to bring out of reset
