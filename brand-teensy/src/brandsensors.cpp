@@ -49,3 +49,61 @@ int readLineSensor(int linePin){
      int lineValue = analogRead(linePin);
      return lineValue;
 }
+
+//Encoder_OP* Encoder_OP::sEncoder = 0;
+
+Encoder_OP::Encoder_OP(int pin1, int pin2)
+{
+   pinMode(pin1, INPUT_PULLUP);
+   pinMode(pin2, INPUT_PULLUP);
+
+   _pin1 = pin1;
+   _pin2 = pin2;
+
+   //sEncoder = this;
+   attachInterrupt(digitalPinToInterrupt(pin1), encISR, CHANGE);
+   attachInterrupt(digitalPinToInterrupt(pin2), encISR, CHANGE);
+}
+
+int32_t Encoder_OP::readEnc()
+{
+   return position;
+}
+
+void Encoder_OP::updateEnc()
+{
+   newState = state & 3;
+   if (digitalRead(_pin1)) newState |= 4;
+	if (digitalRead(_pin2)) newState |= 8;
+		switch (newState) {
+			case 0: case 5: case 10: case 15:
+				break;
+			case 1: case 7: case 8: case 14:
+				position++; break;
+			case 2: case 4: case 11: case 13:
+				position--; break;
+			case 3: case 12:
+				position += 2; break;
+			default:
+				position -= 2; break;
+		}
+		state = (newState >> 2);
+}
+
+void Encoder_OP::resetEnc()
+{
+   position = 0;
+}
+
+/*
+void Encoder_OP::updateEncoderISR()
+{
+   if (sEncoder != 0)
+        sEncoder->updateEnc();
+}
+*/
+
+void encISR(Encoder_OP* enc)
+{
+   enc->updateEnc();
+}

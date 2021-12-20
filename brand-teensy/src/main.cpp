@@ -24,7 +24,7 @@
 #include <LSM303.h>
 #include <L3G.h>
 #include <Adafruit_AMG88xx.h>
-#include <Encoder.h>
+//#include <Encoder.h>
 #include "brandsensor.h"
 #include <PID_OP.h>
 
@@ -64,8 +64,10 @@ int Rightline = A13; // Right Line sensor
 LOLIN_I2C_MOTOR motor; //I2C address 0x30
 
 //### Encoder ###
-Encoder RightEnc(ENC_A1, ENC_B1);
-Encoder LeftEnc(ENC_A2, ENC_B2);
+Encoder_OP LeftEnc(ENC_A2, ENC_B2);
+Encoder_OP RightEnc(ENC_A1, ENC_B1);
+//uint8_t encState = 0;
+
 
 //### Distance Sensors ###
 #define SENSOR1_WIRE Wire
@@ -252,7 +254,7 @@ void RunMotors(float velocity, float angular);
 
 void setup()
 {
-  //Serial.begin(115200);
+  Serial.begin(115200);
   Serial1.begin(57600);
   Wire.begin();
   pinMode(13, OUTPUT);
@@ -317,7 +319,18 @@ void setup()
   
   delay(100); // let sensor boot up
   //----------------------------------------------------------
-  
+
+  //---------------------Encoder ------------------------------
+  /*
+  pinMode(ENC_A1, INPUT);
+  pinMode(ENC_A2, INPUT);
+  pinMode(ENC_B1, INPUT);
+  pinMode(ENC_B2, INPUT);
+  attachInterrupt(digitalPinToInterrupt(ENC_A1), blink, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_A2), blink, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_B1), blink, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_B2), blink, CHANGE);
+  */
 
   //---------------------- ROS -------------------------------
   
@@ -351,8 +364,10 @@ void loop()
   float heading = compass.heading();
   calcAngle();
 
-  rightEncPos = RightEnc.read();
-  leftEncPos = LeftEnc.read();
+  
+  rightEncPos = RightEnc.readEnc();
+  leftEncPos = LeftEnc.readEnc();
+  /*
   if (rightEncPos != oldRightEncPos){
     rightEncTime = micros() - rightEncStartTime;
     rightEncStartTime = micros();
@@ -363,11 +378,12 @@ void loop()
     leftEncStartTime = micros();
     leftEncPulsesPerSec = 1000000.0 / leftEncTime;
   }
+  
   if (rightEncPos != oldRightEncPos || leftEncPos != oldLeftEncPos){
     oldRightEncPos = rightEncPos;
     oldLeftEncPos = leftEncPos;
   }
-
+*/
   leftLineValue = readLineSensor(leftLine);
   rightLineValue = readLineSensor(Rightline);
   
@@ -385,15 +401,17 @@ void loop()
     //Serial.print(leftLineValue);
    // Serial.print(" ");
    // Serial.println(rightLineValue);
+   
    Serial.print("Right: ");
    Serial.print(rightEncPos);
    Serial.print(" Left: ");
-   Serial.print(leftEncPos);
+   Serial.println(leftEncPos);
+   /*
    Serial.print(" Right p/s: ");
    Serial.print(rightEncPulsesPerSec);
    Serial.print(" Left p/s: ");
    Serial.println(leftEncPulsesPerSec);
-    
+    */
 
     lastSerial = millis();
   }
@@ -627,7 +645,7 @@ void timed_async_read_sensors() {
 }
 
 
- void calcAngle()
+void calcAngle()
  {
   deltaT = micros() - tLast;
   tLast = micros();
@@ -671,3 +689,4 @@ void RunMotors(float velocity, float angular){
   }
 
 }
+
