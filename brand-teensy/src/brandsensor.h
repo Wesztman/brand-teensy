@@ -20,27 +20,4 @@ void printIRCamera(float pixels[]);
 //Return value from line sensor 0-1024
 int readLineSensor(int linePin);
 
-class Encoder_OP
-{
-    public:
-        Encoder_OP(int pin1, int pin2);
-        int32_t readEnc();
-        void updateEnc();
-        void resetEnc();
-
-        uint8_t state;
-            
-    private:
-        uint8_t newState;
-        uint32_t position;
-
-        int _pin1;
-        int _pin2;
-        
-        //static Encoder_OP *sEncoder;
-        //static void updateEncoderISR();
-};
-
-void encISR(Encoder_OP* enc);
-
 #endif

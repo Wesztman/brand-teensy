@@ -64,8 +64,8 @@ int Rightline = A13; // Right Line sensor
 LOLIN_I2C_MOTOR motor; //I2C address 0x30
 
 //### Encoder ###
-Encoder_OP LeftEnc(ENC_A2, ENC_B2);
-Encoder_OP RightEnc(ENC_A1, ENC_B1);
+//Encoder_OP LeftEnc(ENC_A2, ENC_B2);
+//Encoder_OP RightEnc(ENC_A1, ENC_B1);
 //uint8_t encState = 0;
 
 
@@ -203,6 +203,18 @@ uint16_t distances_mm[9]; //Stores all ToF distance sensor data
 unsigned long serialDelay = 100; // Delay in ms between each Serial print.
 unsigned long lastSerial = 0; // Store time of last Serial print
 
+//----------------ENCODER------------------------------
+volatile uint8_t stateR;
+volatile uint8_t newStateR;
+volatile long rightEncPosRaw = 0;
+long rightEncPos = 0;
+
+volatile uint8_t stateL;
+volatile uint8_t newStateL;
+volatile long leftEncPosRaw = 0;
+long leftEncPos = 0;
+
+/*
 long rightEncPos = 0;
 long oldRightEncPos = 0; //old -999
 long rightEncTime = 0;
@@ -213,8 +225,9 @@ long oldLeftEncPos = 0; //old -999
 long leftEncTime = 0;
 long leftEncStartTime = 0;
 float leftEncPulsesPerSec = 0;
+*/
 
-
+//----------------LINE SENSOR-------------------
 int leftLineValue = 0;
 int rightLineValue = 0;
 
@@ -246,6 +259,8 @@ void timed_async_read_sensors();
 void calcAngle();
 void irCameraTest();
 void RunMotors(float velocity, float angular);
+void encRightISR();
+void encLeftISR();
 
 
 // ================================================================
@@ -254,7 +269,7 @@ void RunMotors(float velocity, float angular);
 
 void setup()
 {
-  Serial.begin(115200);
+  //Serial.begin(115200);
   Serial1.begin(57600);
   Wire.begin();
   pinMode(13, OUTPUT);
@@ -321,16 +336,16 @@ void setup()
   //----------------------------------------------------------
 
   //---------------------Encoder ------------------------------
-  /*
-  pinMode(ENC_A1, INPUT);
-  pinMode(ENC_A2, INPUT);
-  pinMode(ENC_B1, INPUT);
-  pinMode(ENC_B2, INPUT);
-  attachInterrupt(digitalPinToInterrupt(ENC_A1), blink, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENC_A2), blink, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENC_B1), blink, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENC_B2), blink, CHANGE);
-  */
+  
+  pinMode(ENC_A1, INPUT_PULLUP);
+  pinMode(ENC_B1, INPUT_PULLUP);
+  pinMode(ENC_A2, INPUT_PULLUP);
+  pinMode(ENC_B2, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ENC_A1), encRightISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_B1), encRightISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_A2), encLeftISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_B2), encLeftISR, CHANGE);
+  
 
   //---------------------- ROS -------------------------------
   
@@ -365,8 +380,8 @@ void loop()
   calcAngle();
 
   
-  rightEncPos = RightEnc.readEnc();
-  leftEncPos = LeftEnc.readEnc();
+  //rightEncPos = RightEnc.readEnc();
+  //leftEncPos = LeftEnc.readEnc();
   /*
   if (rightEncPos != oldRightEncPos){
     rightEncTime = micros() - rightEncStartTime;
@@ -384,6 +399,12 @@ void loop()
     oldLeftEncPos = leftEncPos;
   }
 */
+  noInterrupts();
+  rightEncPos = rightEncPosRaw;
+  leftEncPos = leftEncPosRaw;
+  interrupts();
+
+
   leftLineValue = readLineSensor(leftLine);
   rightLineValue = readLineSensor(Rightline);
   
@@ -429,7 +450,7 @@ void loop()
   }
 
   //###TEST###
-  x = 0.30;
+  x = 0.3;
   
   //#########
 
@@ -688,5 +709,45 @@ void RunMotors(float velocity, float angular){
     motor.changeDuty(MOTOR_CH_BOTH, duty);
   }
 
+}
+
+void encRightISR()
+{
+   newStateR = stateR & 3;
+   if (digitalRead(ENC_A1)) newStateR |= 4;
+	if (digitalRead(ENC_B1)) newStateR |= 8;
+		switch (newStateR) {
+			case 0: case 5: case 10: case 15:
+				break;
+			case 1: case 7: case 8: case 14:
+				rightEncPosRaw++; break;
+			case 2: case 4: case 11: case 13:
+				rightEncPosRaw--; break;
+			case 3: case 12:
+				rightEncPosRaw += 2; break;
+			default:
+				rightEncPosRaw -= 2; break;
+		}
+		stateR = (newStateR >> 2);
+}
+
+void encLeftISR()
+{
+   newStateL = stateL & 3;
+   if (digitalRead(ENC_A2)) newStateL |= 4;
+	if (digitalRead(ENC_B2)) newStateL |= 8;
+		switch (newStateL) {
+			case 0: case 5: case 10: case 15:
+				break;
+			case 1: case 7: case 8: case 14:
+				leftEncPosRaw++; break;
+			case 2: case 4: case 11: case 13:
+				leftEncPosRaw--; break;
+			case 3: case 12:
+				leftEncPosRaw += 2; break;
+			default:
+				leftEncPosRaw -= 2; break;
+		}
+		stateL = (newStateL >> 2);
 }
 
