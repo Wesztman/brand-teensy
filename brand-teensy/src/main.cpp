@@ -204,25 +204,45 @@ unsigned long serialDelay = 100; // Delay in ms between each Serial print.
 unsigned long lastSerial = 0; // Store time of last Serial print
 
 //----------------ENCODER------------------------------
+float Aenc = 0.01;
+float Benc = 0.99;
+
 volatile uint8_t stateR;
 volatile uint8_t newStateR;
 volatile long rightEncPosRaw = 0;
 long rightEncPos = 0;
+long rightEncTimeRaw = 0;
+long rightEncStartTime = 0;
+long rightEncTime = 0;
+bool clockFlagR = true; 
+float rightEncTimeFilt = 0.0;
 
 volatile uint8_t stateL;
 volatile uint8_t newStateL;
 volatile long leftEncPosRaw = 0;
 long leftEncPos = 0;
+long leftEncTimeRaw = 0;
+long leftEncStartTime = 0;
+long leftEncTime = 0;
+bool clockFlagL = true;
+float leftEncTimeFilt = 0.0;
+
+//calculated meter per pulse
+//Wheel Di = 66 mm, circumference = 207,35 mm
+//Encoder has 12 pulses per revulotion = 0.01728 m/p
+const float meterPerPulse = 0.01728;
+float rightVelocity = 0.0; 
+float leftVelocity = 0.0; 
 
 /*
 long rightEncPos = 0;
 long oldRightEncPos = 0; //old -999
-long rightEncTime = 0;
+long rightEncTimeRaw = 0;
 long rightEncStartTime = 0;
-float rightEncPulsesPerSec = 0;
+float rightEncPulseslong rightEncTime = 0;PerSec = 0;
 long leftEncPos = 0;
 long oldLeftEncPos = 0; //old -999
-long leftEncTime = 0;
+long leftEncTimeRaw = 0;
 long leftEncStartTime = 0;
 float leftEncPulsesPerSec = 0;
 */
@@ -384,14 +404,14 @@ void loop()
   //leftEncPos = LeftEnc.readEnc();
   /*
   if (rightEncPos != oldRightEncPos){
-    rightEncTime = micros() - rightEncStartTime;
+    rightEncTimeRaw = micros() - rightEncStartTime;
     rightEncStartTime = micros();
-    rightEncPulsesPerSec = 1000000.0 / rightEncTime;
+    rightEncPulsesPlong rightEncTime = 0;erSec = 1000000.0 / rightEncTimeRaw;
   }
-  if (leftEncPos != oldLeftEncPos){
-    leftEncTime = micros() - leftEncStartTime;
+  if (leftEncPos != oldLeftEncPos){long rightEncTime = 0;
+    leftEncTimeRaw = micros() - leftEncStartTime;
     leftEncStartTime = micros();
-    leftEncPulsesPerSec = 1000000.0 / leftEncTime;
+    leftEncPulsesPerSec = 1000000.0 / leftEncTimeRaw;
   }
   
   if (rightEncPos != oldRightEncPos || leftEncPos != oldLeftEncPos){
@@ -402,8 +422,14 @@ void loop()
   noInterrupts();
   rightEncPos = rightEncPosRaw;
   leftEncPos = leftEncPosRaw;
+  rightEncTime = rightEncTimeRaw;
+  leftEncTime = leftEncTimeRaw;
   interrupts();
 
+  leftEncTimeFilt = Aenc * leftEncTime + Benc * leftEncTimeFilt;
+  rightEncTimeFilt = Aenc * rightEncTime + Benc * rightEncTimeFilt;
+  leftVelocity = meterPerPulse * 1000000 / leftEncTimeFilt; 
+  rightVelocity = meterPerPulse * 1000000 / rightEncTimeFilt; 
 
   leftLineValue = readLineSensor(leftLine);
   rightLineValue = readLineSensor(Rightline);
@@ -422,17 +448,21 @@ void loop()
     //Serial.print(leftLineValue);
    // Serial.print(" ");
    // Serial.println(rightLineValue);
-   
+   /*
    Serial.print("Right: ");
    Serial.print(rightEncPos);
    Serial.print(" Left: ");
-   Serial.println(leftEncPos);
-   /*
-   Serial.print(" Right p/s: ");
-   Serial.print(rightEncPulsesPerSec);
-   Serial.print(" Left p/s: ");
-   Serial.println(leftEncPulsesPerSec);
-    */
+   Serial.print(leftEncPos);
+   Serial.print(" Right s/p[ms]: ");
+   Serial.print(rightEncTime);
+   Serial.print(" Left s/p[ms]: ");
+   */
+   Serial.print(leftEncTime);
+   Serial.print(" ");
+   Serial.print(leftEncTimeFilt);
+   Serial.print(" ");
+   Serial.println(leftVelocity);
+  
 
     lastSerial = millis();
   }
@@ -450,7 +480,7 @@ void loop()
   }
 
   //###TEST###
-  x = 0.3;
+  x = 0.5;
   
   //#########
 
@@ -711,26 +741,60 @@ void RunMotors(float velocity, float angular){
 
 }
 
+//See brandsensor.h for description
 void encRightISR()
 {
-   newStateR = stateR & 3;
-   if (digitalRead(ENC_A1)) newStateR |= 4;
+  newStateR = stateR & 3;
+  if (digitalRead(ENC_A1)) newStateR |= 4;
 	if (digitalRead(ENC_B1)) newStateR |= 8;
 		switch (newStateR) {
 			case 0: case 5: case 10: case 15:
 				break;
 			case 1: case 7: case 8: case 14:
-				rightEncPosRaw++; break;
+				rightEncPosRaw++;
+        if(clockFlagR){
+          rightEncStartTime = micros();
+          clockFlagR = false;
+        }else {
+          rightEncTimeRaw = micros() - rightEncStartTime;
+          clockFlagR = true;
+        }
+        break;
 			case 2: case 4: case 11: case 13:
-				rightEncPosRaw--; break;
+				rightEncPosRaw--;
+        if(clockFlagR){
+          rightEncStartTime = micros();
+          clockFlagR = false;
+        }else {
+          rightEncTimeRaw = micros() - rightEncStartTime;
+          clockFlagR = true;
+        }
+         break;
 			case 3: case 12:
-				rightEncPosRaw += 2; break;
+				rightEncPosRaw += 2;
+        if(clockFlagR){
+          rightEncStartTime = micros();
+          clockFlagR = false;
+        }else {
+          rightEncTimeRaw = (micros() - rightEncStartTime) / 2;
+          clockFlagR = true;
+        }
+         break;
 			default:
-				rightEncPosRaw -= 2; break;
-		}
+				rightEncPosRaw -= 2;
+        if(clockFlagR){
+          rightEncStartTime = micros();
+          clockFlagR = false;
+        }else {
+          rightEncTimeRaw = (micros() - rightEncStartTime) / 2;
+          clockFlagR = true;
+        }
+         break;
+	  }
 		stateR = (newStateR >> 2);
 }
 
+//See brandsensor.h for description
 void encLeftISR()
 {
    newStateL = stateL & 3;
@@ -740,13 +804,45 @@ void encLeftISR()
 			case 0: case 5: case 10: case 15:
 				break;
 			case 1: case 7: case 8: case 14:
-				leftEncPosRaw++; break;
+				leftEncPosRaw++;
+        if(clockFlagL){
+          leftEncStartTime = micros();
+          clockFlagL = false;
+        }else {
+          leftEncTimeRaw = micros() - leftEncStartTime;
+          clockFlagL = true;
+        }
+        break;
 			case 2: case 4: case 11: case 13:
-				leftEncPosRaw--; break;
+				leftEncPosRaw--; 
+        if(clockFlagL){
+          leftEncStartTime = micros();
+          clockFlagL = false;
+        }else {
+          leftEncTimeRaw = micros() - leftEncStartTime;
+          clockFlagL = true;
+        }
+        break;
 			case 3: case 12:
-				leftEncPosRaw += 2; break;
+				leftEncPosRaw += 2; 
+        if(clockFlagL){
+          leftEncStartTime = micros();
+          clockFlagL = false;
+        }else {
+          leftEncTimeRaw = (micros() - leftEncStartTime) / 2;
+          clockFlagL = true;
+        }
+        break;
 			default:
-				leftEncPosRaw -= 2; break;
+				leftEncPosRaw -= 2; 
+        if(clockFlagL){
+          leftEncStartTime = micros();
+          clockFlagL = false;
+        }else {
+          leftEncTimeRaw = (micros() - leftEncStartTime) / 2;
+          clockFlagL = true;
+        }
+        break;
 		}
 		stateL = (newStateL >> 2);
 }
