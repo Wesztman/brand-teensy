@@ -191,6 +191,22 @@ sensor_msgs::Range VL53L0X_1;
 
 ros::Subscriber<geometry_msgs::Twist> drive("cmd_vel", velCallback);
 
+//### PID Controller ###
+
+float Kp = 1.0;
+float Ki = 0.0;
+float Kd = 0.1;
+float uMax = 100.0;
+float uMin = -100.0;
+//Tau is chosen as Kd/Kp/N, with N in the range of 2 to 20.
+float tau = 0.02;
+float samplingTime = 0.01;
+unsigned long motorPIDSample = 10; // samlingTime * 1000
+unsigned long lastSample = 0;
+
+PID_OP RightMotorPID(Kp, Ki, Kd, tau, uMax, uMin, samplingTime);
+PID_OP LeftMotorPID(Kp, Ki, Kd, tau, uMax, uMin, samplingTime);
+
 //=================================================================
 //===                       VARIABLES                          ====
 //=================================================================
@@ -204,6 +220,7 @@ unsigned long serialDelay = 100; // Delay in ms between each Serial print.
 unsigned long lastSerial = 0; // Store time of last Serial print
 
 //----------------ENCODER------------------------------
+
 float Aenc = 0.01;
 float Benc = 0.99;
 
@@ -230,9 +247,16 @@ float leftEncTimeFilt = 0.0;
 //calculated meter per pulse
 //Wheel Di = 66 mm, circumference = 207,35 mm
 //Encoder has 12 pulses per revulotion = 0.01728 m/p
-const float meterPerPulse = 0.01728;
+float meterPerPulse = 0.01728;
+
 float rightVelocity = 0.0; 
 float leftVelocity = 0.0; 
+float leftMotorSetpoint = 0.0;
+float rightMotorSetpoint = 0.0;
+float leftControlSignal = 0.0;
+float rightControlSignal = 0.0;
+
+float testVel = 17280.0;
 
 /*
 long rightEncPos = 0;
@@ -374,6 +398,12 @@ void setup()
   nh.subscribe(drive);
   
   //----------------------------------------------------------
+
+  //---------------------- PID -------------------------------
+
+  //Initiate PID
+  RightMotorPID.PIDInit();
+  LeftMotorPID.PIDInit();
   
 }
 
@@ -428,13 +458,24 @@ void loop()
 
   leftEncTimeFilt = Aenc * leftEncTime + Benc * leftEncTimeFilt;
   rightEncTimeFilt = Aenc * rightEncTime + Benc * rightEncTimeFilt;
-  leftVelocity = meterPerPulse * 1000000 / leftEncTimeFilt; 
-  rightVelocity = meterPerPulse * 1000000 / rightEncTimeFilt; 
+  //leftVelocity = testVel/leftEncTimeFilt; 
+  leftVelocity = leftEncTimeFilt/1000000.0 + 0.13; 
+  //leftVelocity = meterPerPulse/leftVelocity;
+  rightVelocity = (meterPerPulse * 1000000.0) / rightEncTimeFilt; 
 
   leftLineValue = readLineSensor(leftLine);
   rightLineValue = readLineSensor(Rightline);
   
+
+  if (millis() - lastSample > motorPIDSample)
+   {
+    leftControlSignal = LeftMotorPID.PIDUpdate(leftMotorSetpoint, leftVelocity);
+    rightControlSignal = RightMotorPID.PIDUpdate(leftMotorSetpoint, 0.23);
+    lastSample = millis();
+    
+  }
   
+
   if (millis() - lastSerial > serialDelay)
    {
   //   Serial.print(ultraDist);
@@ -461,7 +502,13 @@ void loop()
    Serial.print(" ");
    Serial.print(leftEncTimeFilt);
    Serial.print(" ");
-   Serial.println(leftVelocity);
+   Serial.print(leftVelocity);
+   Serial.print(" ");
+   Serial.print(rightControlSignal);
+   Serial.print(" ");
+   Serial.print(rightVelocity);
+   Serial.print(" ");
+   Serial.println(leftControlSignal);
   
 
     lastSerial = millis();
@@ -480,8 +527,9 @@ void loop()
   }
 
   //###TEST###
-  x = 0.5;
-  
+  x = 0.3;
+  leftMotorSetpoint = 0.5;
+
   //#########
 
   RunMotors(x, z);
