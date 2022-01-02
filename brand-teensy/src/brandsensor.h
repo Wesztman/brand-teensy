@@ -20,6 +20,25 @@ void printIRCamera(float pixels[]);
 //Return value from line sensor 0-1024
 int readLineSensor(int linePin);
 
+class Button_OP
+{
+   public:
+	 Button_OP(int buttonPin);
+	 
+	 void init();
+	 void update();
+	 bool getState();
+	 bool isPressed();
+
+
+   private:
+   	 int _buttonPin;
+	 bool buttonState;
+     bool lastButtonState;
+     unsigned long lastDebounceTime = 0;
+     unsigned long debounceDelay = 50;
+};
+
 //-----------Encoder description--------------
 //                           _______         _______       
 //               Pin1 ______|       |_______|       |______ Pin1

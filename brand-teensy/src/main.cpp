@@ -54,7 +54,9 @@ int ENC_B1 = 7;   // Right encoder B-channel
 int ENC_A2 = 8;   // Left encoder A-channel
 int ENC_B2 = 9;   // Left encoder B-channel
 int leftLine = A12; // Left Line sensor
-int Rightline = A13; // Right Line sensor
+int rightLine = A13; // Right Line sensor
+int startPin = 4;  // Start Button
+int stopPin = 5;  // Stop Button
 
 //=================================================================
 //===                       SYSTEM DEFINTION                   ====
@@ -62,12 +64,6 @@ int Rightline = A13; // Right Line sensor
 
 //### Motor Driver ###
 LOLIN_I2C_MOTOR motor; //I2C address 0x30
-
-//### Encoder ###
-//Encoder_OP LeftEnc(ENC_A2, ENC_B2);
-//Encoder_OP RightEnc(ENC_A1, ENC_B1);
-//uint8_t encState = 0;
-
 
 //### Distance Sensors ###
 #define SENSOR1_WIRE Wire
@@ -174,7 +170,7 @@ float pixels[AMG88xx_PIXEL_ARRAY_SIZE];
 
 //### ROS ###
 
-float x;  //Linear velocity
+float x = 0.0;  //Linear velocity
 float z;  //angular velocity
 
 ros::NodeHandle nh;
@@ -193,19 +189,26 @@ ros::Subscriber<geometry_msgs::Twist> drive("cmd_vel", velCallback);
 
 //### PID Controller ###
 
-float Kp = 1.0;
-float Ki = 0.0;
-float Kd = 0.1;
+float Kp = 80.0;
+float Ki = 50.0;
+float Kd = 0.0;
 float uMax = 100.0;
 float uMin = -100.0;
 //Tau is chosen as Kd/Kp/N, with N in the range of 2 to 20.
-float tau = 0.02;
+float tau = 0.01; //old 0.02
 float samplingTime = 0.01;
+
 unsigned long motorPIDSample = 10; // samlingTime * 1000
 unsigned long lastSample = 0;
 
 PID_OP RightMotorPID(Kp, Ki, Kd, tau, uMax, uMin, samplingTime);
 PID_OP LeftMotorPID(Kp, Ki, Kd, tau, uMax, uMin, samplingTime);
+
+//### Buttons### 
+
+Button_OP startButton(startPin);
+Button_OP stopButton(stopPin);
+bool startFlag = LOW;
 
 //=================================================================
 //===                       VARIABLES                          ====
@@ -221,8 +224,13 @@ unsigned long lastSerial = 0; // Store time of last Serial print
 
 //----------------ENCODER------------------------------
 
-float Aenc = 0.01;
-float Benc = 0.99;
+float Afilt = 0.01; //filter weight for new values
+float Bfilt = 0.99; //filter weight for new values
+long encMax = 1000000; // 1 sec in us
+unsigned long encDiffTime = 1000; //1 sec in ms
+unsigned long lastEncSample = 0; 
+bool firstStartFlag = HIGH;
+
 
 volatile uint8_t stateR;
 volatile uint8_t newStateR;
@@ -231,8 +239,10 @@ long rightEncPos = 0;
 long rightEncTimeRaw = 0;
 long rightEncStartTime = 0;
 long rightEncTime = 0;
+long rightEncTimeOld = 0;
 bool clockFlagR = true; 
 float rightEncTimeFilt = 0.0;
+float rightEncTimeSec = 0.0;
 
 volatile uint8_t stateL;
 volatile uint8_t newStateL;
@@ -241,8 +251,10 @@ long leftEncPos = 0;
 long leftEncTimeRaw = 0;
 long leftEncStartTime = 0;
 long leftEncTime = 0;
+long leftEncTimeOld = 0;
 bool clockFlagL = true;
 float leftEncTimeFilt = 0.0;
+float leftEncTimeSec = 0.0;
 
 //calculated meter per pulse
 //Wheel Di = 66 mm, circumference = 207,35 mm
@@ -250,26 +262,19 @@ float leftEncTimeFilt = 0.0;
 float meterPerPulse = 0.01728;
 
 float rightVelocity = 0.0; 
+float rightVelocityFilt = 0.0; 
 float leftVelocity = 0.0; 
+float leftVelocityFilt = 0.0; 
 float leftMotorSetpoint = 0.0;
 float rightMotorSetpoint = 0.0;
 float leftControlSignal = 0.0;
 float rightControlSignal = 0.0;
 
-float testVel = 17280.0;
-
-/*
-long rightEncPos = 0;
-long oldRightEncPos = 0; //old -999
-long rightEncTimeRaw = 0;
-long rightEncStartTime = 0;
-float rightEncPulseslong rightEncTime = 0;PerSec = 0;
-long leftEncPos = 0;
-long oldLeftEncPos = 0; //old -999
-long leftEncTimeRaw = 0;
-long leftEncStartTime = 0;
-float leftEncPulsesPerSec = 0;
-*/
+float testVel = 17.28;
+long test2Vel = 17280;
+float testF = 0.0;
+long leftTEST = 0;
+long left2Test = 0;
 
 //----------------LINE SENSOR-------------------
 int leftLineValue = 0;
@@ -288,7 +293,6 @@ float estGyroDrift = -18;  //Is dependent on temperature and how often the angle
 float angleZRel;
 float angleZRelDeg;
 
-//-----------------------------------------------------------
 
 
 // ================================================================
@@ -414,6 +418,7 @@ void setup()
 
 void loop()
 {
+    
   nh.spinOnce();
   //motorTest(motor);
   //blinkTest();
@@ -429,26 +434,11 @@ void loop()
   float heading = compass.heading();
   calcAngle();
 
-  
-  //rightEncPos = RightEnc.readEnc();
-  //leftEncPos = LeftEnc.readEnc();
-  /*
-  if (rightEncPos != oldRightEncPos){
-    rightEncTimeRaw = micros() - rightEncStartTime;
-    rightEncStartTime = micros();
-    rightEncPulsesPlong rightEncTime = 0;erSec = 1000000.0 / rightEncTimeRaw;
-  }
-  if (leftEncPos != oldLeftEncPos){long rightEncTime = 0;
-    leftEncTimeRaw = micros() - leftEncStartTime;
-    leftEncStartTime = micros();
-    leftEncPulsesPerSec = 1000000.0 / leftEncTimeRaw;
-  }
-  
-  if (rightEncPos != oldRightEncPos || leftEncPos != oldLeftEncPos){
-    oldRightEncPos = rightEncPos;
-    oldLeftEncPos = leftEncPos;
-  }
-*/
+  leftLineValue = readLineSensor(leftLine);
+  rightLineValue = readLineSensor(rightLine);
+
+  //Assign encoder values without interrupts to make sure 
+  //the raw value wont be affected by interrupts  
   noInterrupts();
   rightEncPos = rightEncPosRaw;
   leftEncPos = leftEncPosRaw;
@@ -456,28 +446,93 @@ void loop()
   leftEncTime = leftEncTimeRaw;
   interrupts();
 
-  leftEncTimeFilt = Aenc * leftEncTime + Benc * leftEncTimeFilt;
-  rightEncTimeFilt = Aenc * rightEncTime + Benc * rightEncTimeFilt;
-  //leftVelocity = testVel/leftEncTimeFilt; 
-  leftVelocity = leftEncTimeFilt/1000000.0 + 0.13; 
-  //leftVelocity = meterPerPulse/leftVelocity;
-  rightVelocity = (meterPerPulse * 1000000.0) / rightEncTimeFilt; 
+  //Cap the encoder time value
+  if (leftEncTime > encMax)
+  {
+    leftEncTime = encMax;
+  }
+  if (rightEncTime > encMax)
+  {
+    rightEncTime = encMax;
+  }
 
-  leftLineValue = readLineSensor(leftLine);
-  rightLineValue = readLineSensor(Rightline);
+  leftEncTimeSec = leftEncTime / 1000000;
+  rightEncTimeSec = rightEncTime / 1000000;
+
+  //Make sure that leftVelocity doesn't get inf
+  if (leftEncTimeSec <= 0.00001)
+  {
+    leftVelocity = 0.0;
+  } else {
+    leftVelocity = meterPerPulse / leftEncTimeSec;
+  }
+//Make sure that rightVelocity doesn't get inf
+  if (rightEncTimeSec <= 0.00001)
+  {
+    rightVelocity = 0.0;
+  } else {
+    rightVelocity = meterPerPulse / rightEncTimeSec;
+  }
+
+  leftVelocityFilt = Afilt * leftVelocity + Bfilt * leftVelocityFilt;
+  rightVelocityFilt = Afilt * rightVelocity + Bfilt * rightVelocityFilt;
+
+  //Enc reset - If encoder value is the same after period,
+  //set all encoder values to zero
+  if (millis() - lastEncSample > encDiffTime)
+  {
+    if (leftEncTimeOld == leftEncTime){
+      leftEncTime = 0;
+      leftEncTimeOld = 0;
+      leftEncTimeFilt = 0;
+      leftVelocityFilt = 0;
+      noInterrupts();
+      leftEncTimeRaw = 0;
+      interrupts();
+    }
+    if (rightEncTimeOld == rightEncTime){
+      rightEncTime = 0;
+      rightEncTimeOld = 0;
+      rightEncTimeFilt = 0;
+      rightVelocityFilt = 0;
+      noInterrupts();
+      rightEncTimeRaw = 0;
+      interrupts();
+    }
+    leftEncTimeOld = leftEncTime;
+    rightEncTimeOld = rightEncTime;
+    lastEncSample = millis();
+  }
   
+  /*
+  Tried to use PID controll for the motors but the encdoer signal oscillating too
+  much and filter made it too slow.
 
   if (millis() - lastSample > motorPIDSample)
-   {
-    leftControlSignal = LeftMotorPID.PIDUpdate(leftMotorSetpoint, leftVelocity);
-    rightControlSignal = RightMotorPID.PIDUpdate(leftMotorSetpoint, 0.23);
+  {
+    leftControlSignal = LeftMotorPID.PIDUpdate(leftMotorSetpoint, leftVelocityFilt);
+    rightControlSignal = RightMotorPID.PIDUpdate(leftMotorSetpoint, 0.23345345);
     lastSample = millis();
     
   }
+  */
+
+  if (startButton.isPressed())
+  {
+    Serial.print("Start");
+    x = 80;
+    startFlag = HIGH;
+  }
   
+  if (stopButton.isPressed())
+  {
+    Serial.print("Stop");
+    x = 0;
+    startFlag = LOW;
+  }
 
   if (millis() - lastSerial > serialDelay)
-   {
+  {
   //   Serial.print(ultraDist);
   //   Serial.print("Heading: ");
   //   Serial.print(heading);
@@ -498,17 +553,39 @@ void loop()
    Serial.print(rightEncTime);
    Serial.print(" Left s/p[ms]: ");
    */
+
+  /*
+   Serial.print("1: ");
    Serial.print(leftEncTime);
-   Serial.print(" ");
-   Serial.print(leftEncTimeFilt);
-   Serial.print(" ");
-   Serial.print(leftVelocity);
-   Serial.print(" ");
-   Serial.print(rightControlSignal);
-   Serial.print(" ");
-   Serial.print(rightVelocity);
-   Serial.print(" ");
-   Serial.println(leftControlSignal);
+   Serial.print(" 2: ");
+   Serial.print(leftEncTimeFilt, 5);
+   Serial.print(" 3: ");
+   Serial.print(leftVelocity, 5);
+   Serial.print(" 4: ");
+   Serial.print(leftEncPos, 5);
+   Serial.print(" 5: ");
+   Serial.print(LeftMotorPID.Ki);
+   Serial.print(" 6: ");
+   Serial.print(LeftMotorPID.error);
+   Serial.print(" 7: ");
+   Serial.print(LeftMotorPID.P);
+   Serial.print(" 8: ");
+   Serial.print(LeftMotorPID.I);
+   Serial.print(" 9: ");
+   Serial.print(leftEncTimeOld);
+   Serial.print(" 10: ");
+   Serial.print(leftVelocityFilt, 5);
+   Serial.print(" 11: ");
+   Serial.print(LeftMotorPID.measurement);
+   Serial.print(" 12: ");
+   Serial.print(LeftMotorPID.measurementOld);
+   Serial.print(" 13: ");
+   Serial.print(LeftMotorPID.tau);
+   Serial.print(" 14: ");
+   Serial.print(LeftMotorPID.D);
+   Serial.print(" 15: ");
+   */
+   Serial.println(leftVelocityFilt, 5);
   
 
     lastSerial = millis();
@@ -527,12 +604,16 @@ void loop()
   }
 
   //###TEST###
-  x = 0.3;
-  leftMotorSetpoint = 0.5;
+  
+  
 
   //#########
-
-  RunMotors(x, z);
+  if (startFlag)
+  {
+    RunMotors(x, z);
+  } else {
+    RunMotors(0, 0);
+  }
 
   //delay(10);
 
@@ -771,20 +852,20 @@ void calcAngle()
 } 
 
 void RunMotors(float velocity, float angular){
-  float duty;
+  float duty = velocity;
   
   if (velocity >= 0)
   {
     motor.changeStatus(MOTOR_CH_BOTH, MOTOR_STATUS_CCW);
-    duty = map(velocity, 0.0, 2.0, 0.0, 100.0);
+    //duty = map(velocity, 0.0, 2.0, 0.0, 100.0);
     motor.changeDuty(MOTOR_CH_BOTH, duty);
   }
   if (velocity < 0)
   {
     motor.changeStatus(MOTOR_CH_BOTH, MOTOR_STATUS_CW);
 
-    duty = map(abs(velocity), 0.0, 2.0, 0.0, 100.0);
-    motor.changeDuty(MOTOR_CH_BOTH, duty);
+    //duty = map(abs(velocity), 0.0, 2.0, 0.0, 100.0);
+    motor.changeDuty(MOTOR_CH_BOTH, abs(duty));
   }
 
 }

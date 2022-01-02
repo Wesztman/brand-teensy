@@ -14,13 +14,14 @@
 
     void PIDInit();
     float PIDUpdate(float _setpoint, float _measurement);
+    void resetIntegral();
 
-  private:
+  //private:
     float Kp; //Proportional gain
     float Ki; //Integral gain
     float Kd; //Derivative gain
     float P;  //Proportinal part
-    float I;  //Inttegral part
+    float I;  //Integral part
     float D;  //Derivative part
     float tau;  //Derivative filter
     float setpoint;  //Setpoint
