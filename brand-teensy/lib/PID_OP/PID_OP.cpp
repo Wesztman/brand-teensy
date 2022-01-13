@@ -42,7 +42,6 @@ float PID_OP::PIDUpdate(float _setpoint, float _measurement)
   */
   I = I + 0.5 * Ki * samplingTime * (error + errorOld);
 
-
   /* Anti-wind-up via dynamic integrator clamping */
   /* Compute integrator limits */
   if (uMax > P) {
@@ -91,6 +90,15 @@ float PID_OP::PIDUpdate(float _setpoint, float _measurement)
   */
   u = P + I + D;
 
+  //If output is inf or nan reset PID
+  if (isinf(u) || isnan(u))
+  {
+    P = 0.0;
+    I = 0.0;
+    D = 0.0;
+    u = 0.0;
+  }
+
   if (u > uMax) {
 
     u = uMax;
@@ -108,4 +116,9 @@ float PID_OP::PIDUpdate(float _setpoint, float _measurement)
   /* Return controller output */
   return u;
 
+}
+
+void PID_OP::resetIntegral()
+{
+  this->I = 0.0;
 }

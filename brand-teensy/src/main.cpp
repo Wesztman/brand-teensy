@@ -24,7 +24,7 @@
 #include <LSM303.h>
 #include <L3G.h>
 #include <Adafruit_AMG88xx.h>
-#include <Encoder.h>
+//#include <Encoder.h>
 #include "brandsensor.h"
 #include <PID_OP.h>
 
@@ -32,6 +32,7 @@
 #include "geometry_msgs/Twist.h"
 #include "sensor_msgs/Range.h"
 #include "std_msgs/String.h"
+#include "std_msgs/Float32.h"
 
 
 //=================================================================
@@ -54,7 +55,9 @@ int ENC_B1 = 7;   // Right encoder B-channel
 int ENC_A2 = 8;   // Left encoder A-channel
 int ENC_B2 = 9;   // Left encoder B-channel
 int leftLine = A12; // Left Line sensor
-int Rightline = A13; // Right Line sensor
+int rightLine = A13; // Right Line sensor
+int startPin = 4;  // Start Button
+int stopPin = 5;  // Stop Button
 
 //=================================================================
 //===                       SYSTEM DEFINTION                   ====
@@ -62,10 +65,6 @@ int Rightline = A13; // Right Line sensor
 
 //### Motor Driver ###
 LOLIN_I2C_MOTOR motor; //I2C address 0x30
-
-//### Encoder ###
-Encoder RightEnc(ENC_A1, ENC_B1);
-Encoder LeftEnc(ENC_A2, ENC_B2);
 
 //### Distance Sensors ###
 #define SENSOR1_WIRE Wire
@@ -143,7 +142,7 @@ uint32_t sensor_last_cycle_time;
 
 //### LSM303 L3G IMU ###
 
-LSM303 compass;
+LSM303 compass; //The sensor is a LSM303DLHC
 L3G gyro;
 /*
   When given no arguments, the heading() function returns the angular
@@ -172,7 +171,7 @@ float pixels[AMG88xx_PIXEL_ARRAY_SIZE];
 
 //### ROS ###
 
-float x;  //Linear velocity
+float x = 0.0;  //Linear velocity
 float z;  //angular velocity
 
 ros::NodeHandle nh;
@@ -185,9 +184,35 @@ void velCallback( const geometry_msgs::Twist& vel){
 //std_msgs::String test_msg;
 //ros::Publisher test_topic("test", &test_msg);
 sensor_msgs::Range VL53L0X_1;
+std_msgs::Float32 angleRateDeg;
+std_msgs::Float32 angleRateRad;
 
-
+ros::Publisher pub1("/angleRateDeg", &angleRateDeg);
+ros::Publisher pub2("/angleRateRad", &angleRateRad);
 ros::Subscriber<geometry_msgs::Twist> drive("cmd_vel", velCallback);
+
+//### PID Controller ###
+
+float Kp = 80.0;
+float Ki = 50.0;
+float Kd = 0.0;
+float uMax = 100.0;
+float uMin = -100.0;
+//Tau is chosen as Kd/Kp/N, with N in the range of 2 to 20.
+float tau = 0.01; //old 0.02
+float samplingTime = 0.01;
+
+unsigned long motorPIDSample = 10; // samlingTime * 1000
+unsigned long lastSample = 0;
+
+PID_OP RightMotorPID(Kp, Ki, Kd, tau, uMax, uMin, samplingTime);
+PID_OP LeftMotorPID(Kp, Ki, Kd, tau, uMax, uMin, samplingTime);
+
+//### Buttons### 
+
+Button_OP startButton(startPin);
+Button_OP stopButton(stopPin);
+bool startFlag = LOW;
 
 //=================================================================
 //===                       VARIABLES                          ====
@@ -201,18 +226,61 @@ uint16_t distances_mm[9]; //Stores all ToF distance sensor data
 unsigned long serialDelay = 100; // Delay in ms between each Serial print.
 unsigned long lastSerial = 0; // Store time of last Serial print
 
+//----------------ENCODER------------------------------
+
+float Afilt = 0.01; //filter weight for new values
+float Bfilt = 0.99; //filter weight for new values
+long encMax = 1000000; // 1 sec in us
+unsigned long encDiffTime = 1000; //1 sec in ms
+unsigned long lastEncSample = 0; 
+bool firstStartFlag = HIGH;
+
+
+volatile uint8_t stateR;
+volatile uint8_t newStateR;
+volatile long rightEncPosRaw = 0;
 long rightEncPos = 0;
-long oldRightEncPos = 0; //old -999
-long rightEncTime = 0;
+long rightEncTimeRaw = 0;
 long rightEncStartTime = 0;
-float rightEncPulsesPerSec = 0;
+long rightEncTime = 0;
+long rightEncTimeOld = 0;
+bool clockFlagR = true; 
+float rightEncTimeFilt = 0.0;
+float rightEncTimeSec = 0.0;
+
+volatile uint8_t stateL;
+volatile uint8_t newStateL;
+volatile long leftEncPosRaw = 0;
 long leftEncPos = 0;
-long oldLeftEncPos = 0; //old -999
-long leftEncTime = 0;
+long leftEncTimeRaw = 0;
 long leftEncStartTime = 0;
-float leftEncPulsesPerSec = 0;
+long leftEncTime = 0;
+long leftEncTimeOld = 0;
+bool clockFlagL = true;
+float leftEncTimeFilt = 0.0;
+float leftEncTimeSec = 0.0;
 
+//calculated meter per pulse
+//Wheel Di = 66 mm, circumference = 207,35 mm
+//Encoder has 12 pulses per revulotion = 0.01728 m/p
+float meterPerPulse = 0.01728;
 
+float rightVelocity = 0.0; 
+float rightVelocityFilt = 0.0; 
+float leftVelocity = 0.0; 
+float leftVelocityFilt = 0.0; 
+float leftMotorSetpoint = 0.0;
+float rightMotorSetpoint = 0.0;
+float leftControlSignal = 0.0;
+float rightControlSignal = 0.0;
+
+float testVel = 17.28;
+long test2Vel = 17280;
+float testF = 0.0;
+long leftTEST = 0;
+long left2Test = 0;
+
+//----------------LINE SENSOR-------------------
 int leftLineValue = 0;
 int rightLineValue = 0;
 
@@ -221,15 +289,15 @@ int rightLineValue = 0;
 float angleZdeg;
 float angleZrad;
 double angleZ;
-float angularRate;
+float angularRate;  //unit mdps
+float angularRateRad; // unit mrps
 long deltaT = 0;
 long tLast = 0;
 float gyroGain = 8.75;    // The gain depends on the angular rate sensitivity. Default 8.75
-float estGyroDrift = -18;  //Is dependent on temperature and how often the angle is calculated
+float estGyroDrift = 0; //3.7;  //Is dependent on temperature and how often the angle is calculated
 float angleZRel;
 float angleZRelDeg;
 
-//-----------------------------------------------------------
 
 
 // ================================================================
@@ -244,6 +312,8 @@ void timed_async_read_sensors();
 void calcAngle();
 void irCameraTest();
 void RunMotors(float velocity, float angular);
+void encRightISR();
+void encLeftISR();
 
 
 // ================================================================
@@ -274,8 +344,8 @@ void setup()
   lead to an assumed magnetometer bias of 0. Use the Calibrate example
   program to determine appropriate values for your particular unit.
   */
-  compass.m_min = (LSM303::vector<int16_t>){-378, -151, +451};
-  compass.m_max = (LSM303::vector<int16_t>){-26, +193, +477};
+  compass.m_min = (LSM303::vector<int16_t>){278, -216, -4};
+  compass.m_max = (LSM303::vector<int16_t>){579, +88, +4};
   //---------------------------------
   
   //------- Setup Motor Driver ------------
@@ -317,6 +387,17 @@ void setup()
   
   delay(100); // let sensor boot up
   //----------------------------------------------------------
+
+  //---------------------Encoder ------------------------------
+  
+  pinMode(ENC_A1, INPUT_PULLUP);
+  pinMode(ENC_B1, INPUT_PULLUP);
+  pinMode(ENC_A2, INPUT_PULLUP);
+  pinMode(ENC_B2, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ENC_A1), encRightISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_B1), encRightISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_A2), encLeftISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_B2), encLeftISR, CHANGE);
   
 
   //---------------------- ROS -------------------------------
@@ -324,8 +405,16 @@ void setup()
   nh.initNode();
   //nh.advertise(test_topic);
   nh.subscribe(drive);
+  nh.advertise(pub1);
+  nh.advertise(pub2);
   
   //----------------------------------------------------------
+
+  //---------------------- PID -------------------------------
+
+  //Initiate PID
+  RightMotorPID.PIDInit();
+  LeftMotorPID.PIDInit();
   
 }
 
@@ -336,10 +425,10 @@ void setup()
 
 void loop()
 {
+  angleRateDeg.data = angularRate;
+  angleRateRad.data = angularRateRad;
+  
   nh.spinOnce();
-  //motorTest(motor);
-  //blinkTest();
-  //amg.readPixels(pixels);
   
   ultraDist = readUltraDist(trigPin, echoPin);  
 
@@ -351,49 +440,156 @@ void loop()
   float heading = compass.heading();
   calcAngle();
 
-  rightEncPos = RightEnc.read();
-  leftEncPos = LeftEnc.read();
-  if (rightEncPos != oldRightEncPos){
-    rightEncTime = micros() - rightEncStartTime;
-    rightEncStartTime = micros();
-    rightEncPulsesPerSec = 1000000.0 / rightEncTime;
+  leftLineValue = readLineSensor(leftLine);
+  rightLineValue = readLineSensor(rightLine);
+
+  //################ ENCODER and Velocity #####################
+  //Assign encoder values without interrupts to make sure 
+  //the raw value wont be affected by interrupts  
+  noInterrupts();
+  rightEncPos = rightEncPosRaw;
+  leftEncPos = leftEncPosRaw;
+  rightEncTime = rightEncTimeRaw;
+  leftEncTime = leftEncTimeRaw;
+  interrupts();
+
+  //Cap the encoder time value
+  if (leftEncTime > encMax)
+  {
+    leftEncTime = encMax;
   }
-  if (leftEncPos != oldLeftEncPos){
-    leftEncTime = micros() - leftEncStartTime;
-    leftEncStartTime = micros();
-    leftEncPulsesPerSec = 1000000.0 / leftEncTime;
-  }
-  if (rightEncPos != oldRightEncPos || leftEncPos != oldLeftEncPos){
-    oldRightEncPos = rightEncPos;
-    oldLeftEncPos = leftEncPos;
+  if (rightEncTime > encMax)
+  {
+    rightEncTime = encMax;
   }
 
-  leftLineValue = readLineSensor(leftLine);
-  rightLineValue = readLineSensor(Rightline);
+  leftEncTimeSec = leftEncTime / 1000000;
+  rightEncTimeSec = rightEncTime / 1000000;
+
+  //Make sure that leftVelocity doesn't get inf
+  if (leftEncTimeSec <= 0.00001)
+  {
+    leftVelocity = 0.0;
+  } else {
+    leftVelocity = meterPerPulse / leftEncTimeSec;
+  }
+//Make sure that rightVelocity doesn't get inf
+  if (rightEncTimeSec <= 0.00001)
+  {
+    rightVelocity = 0.0;
+  } else {
+    rightVelocity = meterPerPulse / rightEncTimeSec;
+  }
+
+  leftVelocityFilt = Afilt * leftVelocity + Bfilt * leftVelocityFilt;
+  rightVelocityFilt = Afilt * rightVelocity + Bfilt * rightVelocityFilt;
+
+  //Enc reset - If encoder value is the same after period,
+  //set all encoder values to zero
+  if (millis() - lastEncSample > encDiffTime)
+  {
+    if (leftEncTimeOld == leftEncTime){
+      leftEncTime = 0;
+      leftEncTimeOld = 0;
+      leftEncTimeFilt = 0;
+      leftVelocityFilt = 0;
+      noInterrupts();
+      leftEncTimeRaw = 0;
+      interrupts();
+    }
+    if (rightEncTimeOld == rightEncTime){
+      rightEncTime = 0;
+      rightEncTimeOld = 0;
+      rightEncTimeFilt = 0;
+      rightVelocityFilt = 0;
+      noInterrupts();
+      rightEncTimeRaw = 0;
+      interrupts();
+    }
+    leftEncTimeOld = leftEncTime;
+    rightEncTimeOld = rightEncTime;
+    lastEncSample = millis();
+  }
   
-  
-  if (millis() - lastSerial > serialDelay)
-   {
-  //   Serial.print(ultraDist);
-  //   Serial.print("Heading: ");
-  //   Serial.print(heading);
-  //   Serial.print(" Gyro RAW Z: ");
-  //   Serial.print((int)gyro.g.z);
-  //   Serial.print(" Vinkel: ");
-  //   Serial.println(angleZdeg);
-    //printIRCamera(pixels);
-    //Serial.print(leftLineValue);
-   // Serial.print(" ");
-   // Serial.println(rightLineValue);
-   Serial.print("Right: ");
-   Serial.print(rightEncPos);
-   Serial.print(" Left: ");
-   Serial.print(leftEncPos);
-   Serial.print(" Right p/s: ");
-   Serial.print(rightEncPulsesPerSec);
-   Serial.print(" Left p/s: ");
-   Serial.println(leftEncPulsesPerSec);
+  /*
+  Tried to use PID controll for the motors but the encdoer signal oscillating too
+  much and filter made it too slow.
+
+  if (millis() - lastSample > motorPIDSample)
+  {
+    leftControlSignal = LeftMotorPID.PIDUpdate(leftMotorSetpoint, leftVelocityFilt);
+    rightControlSignal = RightMotorPID.PIDUpdate(leftMotorSetpoint, 0.23345345);
+    lastSample = millis();
     
+  }
+  */
+ //--------------------------------------------------------------------------------
+  if (startButton.isPressed())
+  {
+    //Serial.print("Start");
+    //x = 80;
+    startFlag = HIGH;
+  }
+  
+  if (stopButton.isPressed())
+  {
+    //Serial.print("Stop");
+    //x = 0;
+    startFlag = LOW;
+  }
+
+  if (millis() - lastSerial > serialDelay)
+  {
+  //   Serial.print(ultraDist);
+  
+     Serial.print("Heading: ");
+     Serial.print(heading);
+     Serial.print(" Gyro RAW Z: ");
+     Serial.print((int)gyro.g.z);
+     Serial.print(" Vinkel: ");
+     Serial.print(angleZdeg);
+     Serial.print(" Vinkel REL: ");
+     Serial.print(angleZRelDeg);
+     Serial.print(" Vinkelhastighet: ");
+     
+     Serial.println(angularRate);
+
+      pub1.publish(&angleRateDeg);  
+      pub2.publish(&angleRateRad);
+
+  /*
+   Serial.print("1: ");
+   Serial.print(leftEncTime);
+   Serial.print(" 2: ");
+   Serial.print(leftEncTimeFilt, 5);
+   Serial.print(" 3: ");
+   Serial.print(leftVelocity, 5);
+   Serial.print(" 4: ");
+   Serial.print(leftEncPos, 5);
+   Serial.print(" 5: ");
+   Serial.print(LeftMotorPID.Ki);
+   Serial.print(" 6: ");
+   Serial.print(LeftMotorPID.error);
+   Serial.print(" 7: ");
+   Serial.print(LeftMotorPID.P);
+   Serial.print(" 8: ");
+   Serial.print(LeftMotorPID.I);
+   Serial.print(" 9: ");
+   Serial.print(leftEncTimeOld);
+   Serial.print(" 10: ");
+   Serial.print(leftVelocityFilt, 5);
+   Serial.print(" 11: ");
+   Serial.print(LeftMotorPID.measurement);
+   Serial.print(" 12: ");
+   Serial.print(LeftMotorPID.measurementOld);
+   Serial.print(" 13: ");
+   Serial.print(LeftMotorPID.tau);
+   Serial.print(" 14: ");
+   Serial.print(LeftMotorPID.D);
+   Serial.print(" 15: ");
+   Serial.println(leftVelocityFilt, 5);
+   */
+  
 
     lastSerial = millis();
   }
@@ -411,11 +607,16 @@ void loop()
   }
 
   //###TEST###
-  x = 0.30;
   
-  //#########
+  
 
-  RunMotors(x, z);
+  //#########
+  if (startFlag)
+  {
+    RunMotors(x, z);
+  } else {
+    RunMotors(0, 0);
+  }
 
   //delay(10);
 
@@ -426,9 +627,6 @@ void loop()
     Serial.println(newPosition);
   }
   */
-
-
-  
 }
 
 
@@ -626,13 +824,17 @@ void timed_async_read_sensors() {
   */
 }
 
-
- void calcAngle()
+//Calculates the rotation angle from the gyro. Calculates both in deg and rad to the following variables:
+//anlgeZdeg
+//angleZrad
+//Limits the Angle to between 0-360 deg
+void calcAngle()
  {
   deltaT = micros() - tLast;
   tLast = micros();
-  //Negative to make the rotation follow the unit circle
-  angularRate = -1 * (int)gyro.g.z * gyroGain;
+  
+  angularRate = (int)gyro.g.z * gyroGain + 506.812; //506.812 is the offset. unit is mpds
+  angularRateRad = angularRate * 71 / 4068;
   angleZ = angleZ + (angularRate * deltaT) / 1000000 - estGyroDrift;
   angleZRel = angleZRel + (angularRate * deltaT) / 1000000 - estGyroDrift;
 
@@ -653,21 +855,170 @@ void timed_async_read_sensors() {
   angleZrad = (angleZdeg *71) / 4068;
 } 
 
-void RunMotors(float velocity, float angular){
-  float duty;
-  
-  if (velocity >= 0)
-  {
-    motor.changeStatus(MOTOR_CH_BOTH, MOTOR_STATUS_CCW);
-    duty = map(velocity, 0.0, 2.0, 0.0, 100.0);
-    motor.changeDuty(MOTOR_CH_BOTH, duty);
-  }
-  if (velocity < 0)
-  {
-    motor.changeStatus(MOTOR_CH_BOTH, MOTOR_STATUS_CW);
+void RunMotors(float velocity, float angular)
+{
+  float dutyLeft = 51.0 * velocity + 3.29 - 20.0 * angular;
+  float dutyRight = 51.0 * velocity + 3.29 + 20.0 * angular;
+  float dutyMax = 80.0;
+  float dutyMin = -80.0;
+  float dutyThreshold = 15.0;
 
-    duty = map(abs(velocity), 0.0, 2.0, 0.0, 100.0);
-    motor.changeDuty(MOTOR_CH_BOTH, duty);
+  //Make sure duty doesn't exceed max value
+  if (dutyLeft >= dutyMax)
+  {
+    dutyLeft = dutyMax;
+  }
+  if (dutyRight >= dutyMax)
+  {
+    dutyRight = dutyMax;
+  }
+  //Make sure duty doesn't exceed min value
+  if (dutyLeft < dutyMin)
+  {
+    dutyLeft = dutyMin;
+  }
+  if (dutyRight <= dutyMin)
+  {
+    dutyRight = dutyMin;
+  }
+
+  //If duty is too low set to zero
+  if (dutyLeft < dutyThreshold && dutyLeft > -dutyThreshold)
+  {
+    dutyLeft = 0.0;
+  }
+  if (dutyRight < dutyThreshold && dutyRight > -dutyThreshold)
+  {
+    dutyRight = 0.0;
+  }
+
+  if (dutyLeft >= 0)
+  {
+    motor.changeStatus(MOTOR_CH_A, MOTOR_STATUS_CCW);
+    motor.changeDuty(MOTOR_CH_A, dutyLeft);
+  }
+  if (dutyLeft < 0)
+  {
+    motor.changeStatus(MOTOR_CH_A, MOTOR_STATUS_CW);
+    motor.changeDuty(MOTOR_CH_A, abs(dutyLeft));
+  }
+  
+  if (dutyRight >= 0)
+  {
+    motor.changeStatus(MOTOR_CH_B, MOTOR_STATUS_CCW);
+    motor.changeDuty(MOTOR_CH_B, dutyRight);
+  }
+  if (dutyRight < 0)
+  {
+    motor.changeStatus(MOTOR_CH_B, MOTOR_STATUS_CW);
+    motor.changeDuty(MOTOR_CH_B, abs(dutyRight));
   }
 
 }
+
+//See brandsensor.h for description
+void encRightISR()
+{
+  newStateR = stateR & 3;
+  if (digitalRead(ENC_A1)) newStateR |= 4;
+	if (digitalRead(ENC_B1)) newStateR |= 8;
+		switch (newStateR) {
+			case 0: case 5: case 10: case 15:
+				break;
+			case 1: case 7: case 8: case 14:
+				rightEncPosRaw++;
+        if(clockFlagR){
+          rightEncStartTime = micros();
+          clockFlagR = false;
+        }else {
+          rightEncTimeRaw = micros() - rightEncStartTime;
+          clockFlagR = true;
+        }
+        break;
+			case 2: case 4: case 11: case 13:
+				rightEncPosRaw--;
+        if(clockFlagR){
+          rightEncStartTime = micros();
+          clockFlagR = false;
+        }else {
+          rightEncTimeRaw = micros() - rightEncStartTime;
+          clockFlagR = true;
+        }
+         break;
+			case 3: case 12:
+				rightEncPosRaw += 2;
+        if(clockFlagR){
+          rightEncStartTime = micros();
+          clockFlagR = false;
+        }else {
+          rightEncTimeRaw = (micros() - rightEncStartTime) / 2;
+          clockFlagR = true;
+        }
+         break;
+			default:
+				rightEncPosRaw -= 2;
+        if(clockFlagR){
+          rightEncStartTime = micros();
+          clockFlagR = false;
+        }else {
+          rightEncTimeRaw = (micros() - rightEncStartTime) / 2;
+          clockFlagR = true;
+        }
+         break;
+	  }
+		stateR = (newStateR >> 2);
+}
+
+//See brandsensor.h for description
+void encLeftISR()
+{
+   newStateL = stateL & 3;
+   if (digitalRead(ENC_A2)) newStateL |= 4;
+	if (digitalRead(ENC_B2)) newStateL |= 8;
+		switch (newStateL) {
+			case 0: case 5: case 10: case 15:
+				break;
+			case 1: case 7: case 8: case 14:
+				leftEncPosRaw++;
+        if(clockFlagL){
+          leftEncStartTime = micros();
+          clockFlagL = false;
+        }else {
+          leftEncTimeRaw = micros() - leftEncStartTime;
+          clockFlagL = true;
+        }
+        break;
+			case 2: case 4: case 11: case 13:
+				leftEncPosRaw--; 
+        if(clockFlagL){
+          leftEncStartTime = micros();
+          clockFlagL = false;
+        }else {
+          leftEncTimeRaw = micros() - leftEncStartTime;
+          clockFlagL = true;
+        }
+        break;
+			case 3: case 12:
+				leftEncPosRaw += 2; 
+        if(clockFlagL){
+          leftEncStartTime = micros();
+          clockFlagL = false;
+        }else {
+          leftEncTimeRaw = (micros() - leftEncStartTime) / 2;
+          clockFlagL = true;
+        }
+        break;
+			default:
+				leftEncPosRaw -= 2; 
+        if(clockFlagL){
+          leftEncStartTime = micros();
+          clockFlagL = false;
+        }else {
+          leftEncTimeRaw = (micros() - leftEncStartTime) / 2;
+          clockFlagL = true;
+        }
+        break;
+		}
+		stateL = (newStateL >> 2);
+}
+

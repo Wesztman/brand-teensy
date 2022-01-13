@@ -49,3 +49,46 @@ int readLineSensor(int linePin){
      int lineValue = analogRead(linePin);
      return lineValue;
 }
+
+
+Button_OP::Button_OP(int buttonPin)
+{
+   _buttonPin = buttonPin;
+   lastButtonState = LOW;
+   init();
+
+}
+
+void Button_OP::init()
+{
+   pinMode(_buttonPin, INPUT);
+   update();
+}
+
+void Button_OP::update()
+{
+   bool newReading = digitalRead(_buttonPin);
+
+   if (newReading != lastButtonState) {
+      lastDebounceTime = millis();
+   }
+   if (millis() - lastDebounceTime > debounceDelay) {
+      // Update the 'state' attribute only if debounce is checked
+      buttonState = newReading;
+   }
+    lastButtonState = newReading;
+}
+
+bool Button_OP::getState()
+{
+   update();
+   return buttonState;
+}
+
+bool Button_OP::isPressed()
+{
+   return (getState() == HIGH);
+}
+
+
+
