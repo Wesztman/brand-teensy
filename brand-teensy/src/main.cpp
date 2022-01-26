@@ -30,9 +30,11 @@
 
 #include "ros.h"
 #include "geometry_msgs/Twist.h"
+#include "geometry_msgs/Point.h"
 #include "sensor_msgs/Range.h"
 #include "std_msgs/String.h"
 #include "std_msgs/Float32.h"
+#include "std_msgs/String.h"
 
 
 //=================================================================
@@ -169,10 +171,36 @@ Adafruit_AMG88xx amg;
 
 float pixels[AMG88xx_PIXEL_ARRAY_SIZE];
 
+//### PID Controller ###
+
+float Kp = 0.04;
+float Ki = 0.09;
+float Kd = 0.001;
+float uMax = 100.0;
+float uMin = -100.0;
+//Tau is chosen as Kd/Kp/N, with N in the range of 2 to 20.
+float tau = 0.01; //old 0.02
+float samplingTime = 0.01;
+
+unsigned long PIDSampletime_ms = 10; // samlingTime * 1000
+unsigned long lastSample = 0;
+
+PID_OP turnPID(Kp, Ki, Kd, tau, uMax, uMin, samplingTime);
+
+//Tried to use PID controll for the motors but the encdoer signal oscillating too
+//much and filter made it too slow.
+
 //### ROS ###
 
 float x = 0.0;  //Linear velocity
-float z;  //angular velocity
+float z = 0.0;  //angular velocity
+int zSign = 0;
+int zSignOld = 0;
+float kpt = 0.04;
+float kit = 0.09;
+float kdt = 0.001;
+char debugString[20];
+char tempString[10];
 
 ros::NodeHandle nh;
 
@@ -181,38 +209,33 @@ void velCallback( const geometry_msgs::Twist& vel){
   z = vel.angular.z;
 }
 
-//std_msgs::String test_msg;
-//ros::Publisher test_topic("test", &test_msg);
+void pidVariables(const geometry_msgs::Point& kpid){
+  kpt = kpid.x;
+  kit = kpid.y;
+  kdt = kpid.z;
+  //Serial.println("ERROR");
+}
+
 sensor_msgs::Range VL53L0X_1;
 std_msgs::Float32 angleRateDeg;
 std_msgs::Float32 angleRateRad;
+std_msgs::String debugData;
 
 ros::Publisher pub1("/angleRateDeg", &angleRateDeg);
 ros::Publisher pub2("/angleRateRad", &angleRateRad);
+ros::Publisher pub3("/debugData", &debugData);
+
 ros::Subscriber<geometry_msgs::Twist> drive("cmd_vel", velCallback);
+ros::Subscriber<geometry_msgs::Point> PIDpara("PIDpara", pidVariables);
 
-//### PID Controller ###
 
-float Kp = 80.0;
-float Ki = 50.0;
-float Kd = 0.0;
-float uMax = 100.0;
-float uMin = -100.0;
-//Tau is chosen as Kd/Kp/N, with N in the range of 2 to 20.
-float tau = 0.01; //old 0.02
-float samplingTime = 0.01;
-
-unsigned long motorPIDSample = 10; // samlingTime * 1000
-unsigned long lastSample = 0;
-
-PID_OP RightMotorPID(Kp, Ki, Kd, tau, uMax, uMin, samplingTime);
-PID_OP LeftMotorPID(Kp, Ki, Kd, tau, uMax, uMin, samplingTime);
 
 //### Buttons### 
 
 Button_OP startButton(startPin);
 Button_OP stopButton(stopPin);
 bool startFlag = LOW;
+bool stopFlag = LOW;
 
 //=================================================================
 //===                       VARIABLES                          ====
@@ -228,10 +251,10 @@ unsigned long lastSerial = 0; // Store time of last Serial print
 
 //----------------ENCODER------------------------------
 
-float Afilt = 0.01; //filter weight for new values
-float Bfilt = 0.99; //filter weight for new values
+float Afilt = 0.02; //filter weight for new values
+float Bfilt = 0.98; //filter weight for new values
 long encMax = 1000000; // 1 sec in us
-unsigned long encDiffTime = 1000; //1 sec in ms
+unsigned long encDiffTime = 500; //0.5 sec in ms
 unsigned long lastEncSample = 0; 
 bool firstStartFlag = HIGH;
 
@@ -271,8 +294,13 @@ float leftVelocity = 0.0;
 float leftVelocityFilt = 0.0; 
 float leftMotorSetpoint = 0.0;
 float rightMotorSetpoint = 0.0;
-float leftControlSignal = 0.0;
-float rightControlSignal = 0.0;
+float turnControlSignal = 0.0;
+float dutyLeft = 0.0;
+float dutyRight = 0.0;
+
+float Aturn = 0.1;
+float Bturn = 0.9;
+float filtAngularRateRad = 0.0;
 
 float testVel = 17.28;
 long test2Vel = 17280;
@@ -407,15 +435,16 @@ void setup()
   nh.subscribe(drive);
   nh.advertise(pub1);
   nh.advertise(pub2);
+  nh.advertise(pub3);
+  nh.subscribe(PIDpara);
   
   //----------------------------------------------------------
 
   //---------------------- PID -------------------------------
 
   //Initiate PID
-  RightMotorPID.PIDInit();
-  LeftMotorPID.PIDInit();
-  
+  turnPID.PIDInit();
+    
 }
 
 
@@ -425,23 +454,25 @@ void setup()
 
 void loop()
 {
-  angleRateDeg.data = angularRate;
-  angleRateRad.data = angularRateRad;
-  
   nh.spinOnce();
   
-  ultraDist = readUltraDist(trigPin, echoPin);  
-
+  //################### Distance sensors ####################
+  //ultraDist = readUltraDist(trigPin, echoPin);
+  leftLineValue = readLineSensor(leftLine);
+  rightLineValue = readLineSensor(rightLine);  
   //timed_async_read_sensors();
-  //simpleFollow(motor, distances_mm[3], distances_mm[5]);
+  
 
+  //#################### IMU #####################################
   compass.read();
   gyro.read();
   float heading = compass.heading();
   calcAngle();
+  filtAngularRateRad = Aturn * angularRateRad + Bturn * filtAngularRateRad;
 
-  leftLineValue = readLineSensor(leftLine);
-  rightLineValue = readLineSensor(rightLine);
+  angleRateDeg.data = angularRate; // -1 because left turn i positive 
+  angleRateRad.data = filtAngularRateRad;  // -1 because left turn i positive
+
 
   //################ ENCODER and Velocity #####################
   //Assign encoder values without interrupts to make sure 
@@ -463,8 +494,8 @@ void loop()
     rightEncTime = encMax;
   }
 
-  leftEncTimeSec = leftEncTime / 1000000;
-  rightEncTimeSec = rightEncTime / 1000000;
+  leftEncTimeSec = leftEncTime / 1000000.0;
+  rightEncTimeSec = rightEncTime / 1000000.0;
 
   //Make sure that leftVelocity doesn't get inf
   if (leftEncTimeSec <= 0.00001)
@@ -509,53 +540,61 @@ void loop()
     leftEncTimeOld = leftEncTime;
     rightEncTimeOld = rightEncTime;
     lastEncSample = millis();
-  }
-  
-  /*
-  Tried to use PID controll for the motors but the encdoer signal oscillating too
-  much and filter made it too slow.
-
-  if (millis() - lastSample > motorPIDSample)
-  {
-    leftControlSignal = LeftMotorPID.PIDUpdate(leftMotorSetpoint, leftVelocityFilt);
-    rightControlSignal = RightMotorPID.PIDUpdate(leftMotorSetpoint, 0.23345345);
-    lastSample = millis();
-    
-  }
-  */
- //--------------------------------------------------------------------------------
+  }  
+   
+   
+  //############### Buttons ############################
   if (startButton.isPressed())
   {
-    //Serial.print("Start");
-    //x = 80;
     startFlag = HIGH;
+    stopFlag = LOW;
   }
   
   if (stopButton.isPressed())
   {
-    //Serial.print("Stop");
-    //x = 0;
+    stopFlag = HIGH;
     startFlag = LOW;
   }
 
+  //################# Communication ######################
   if (millis() - lastSerial > serialDelay)
   {
+
+    //sprintf(debugString,"Turn: %f", turnControlSignal);
+    
+    strcpy(debugString, "Turn: ");
+    dtostrf(turnControlSignal, 4, 1, tempString);
+    strcat(debugString, tempString);
+    strcat(debugString, " VelR: ");
+    dtostrf(rightVelocityFilt, 4, 3, tempString);
+    strcat(debugString, tempString);
+    strcat(debugString, " VelL: ");
+    dtostrf(leftVelocityFilt, 4, 3, tempString);
+    strcat(debugString, tempString);
+    //strcat(debugString, " D: ");
+    //dtostrf(turnPID.D, 4, 1, tempString);
+    //strcat(debugString, tempString);
+    
+    debugData.data = debugString;
+
   //   Serial.print(ultraDist);
-  
-     Serial.print("Heading: ");
-     Serial.print(heading);
-     Serial.print(" Gyro RAW Z: ");
-     Serial.print((int)gyro.g.z);
-     Serial.print(" Vinkel: ");
-     Serial.print(angleZdeg);
-     Serial.print(" Vinkel REL: ");
-     Serial.print(angleZRelDeg);
-     Serial.print(" Vinkelhastighet: ");
+    
+    Serial.print("R: ");
+    Serial.print(dutyRight);
+    Serial.print(" L: ");
+    Serial.print(dutyLeft);
+     Serial.print("VelR: ");
+     Serial.print(rightEncTime);
+     Serial.print(",");
+     Serial.println(leftEncTime);
      
-     Serial.println(angularRate);
+     //Serial.print(" Vinkelhastighet: ");
+     
+     //Serial.println(z);
 
       pub1.publish(&angleRateDeg);  
       pub2.publish(&angleRateRad);
+      pub3.publish(&debugData);
 
   /*
    Serial.print("1: ");
@@ -607,15 +646,31 @@ void loop()
   }
 
   //###TEST###
-  
-  
+    
 
   //#########
   if (startFlag)
   {
-    RunMotors(x, z);
-  } else {
-    RunMotors(0, 0);
+    if (z > 0)
+    {
+      zSign = 1;
+    }else if (z < 0)
+    {
+      zSign = -1;
+    }else if (z = 0)
+    {
+      zSign = 0;
+    }
+
+    if (zSign != zSignOld)
+    {
+      turnPID.resetIntegral();
+    }
+    
+    RunMotors(x, z); //x, z 
+    zSignOld = zSign;
+  } else if (stopFlag) {
+    motor.changeStatus(MOTOR_CH_BOTH, MOTOR_STATUS_STOP);
   }
 
   //delay(10);
@@ -857,11 +912,29 @@ void calcAngle()
 
 void RunMotors(float velocity, float angular)
 {
-  float dutyLeft = 51.0 * velocity + 3.29 - 20.0 * angular;
-  float dutyRight = 51.0 * velocity + 3.29 + 20.0 * angular;
   float dutyMax = 80.0;
   float dutyMin = -80.0;
   float dutyThreshold = 15.0;
+  float dutyOffset = 3.29;
+  if (velocity < 0)
+  {
+    dutyOffset = -3.29;
+  }
+
+  turnPID.Kp = kpt;
+  turnPID.Ki = kit;
+  turnPID.Kd = kdt;
+
+  if (millis() - lastSample > PIDSampletime_ms)
+  {
+    turnControlSignal = turnPID.PIDUpdate(angular*1000.0, filtAngularRateRad);
+    
+    lastSample = millis();
+    
+  }
+
+  dutyLeft = 51.0 * velocity + dutyOffset - turnControlSignal;
+  dutyRight = 51.0 * velocity + dutyOffset + turnControlSignal;
 
   //Make sure duty doesn't exceed max value
   if (dutyLeft >= dutyMax)
@@ -889,7 +962,7 @@ void RunMotors(float velocity, float angular)
   }
   if (dutyRight < dutyThreshold && dutyRight > -dutyThreshold)
   {
-    dutyRight = 0.0;
+    dutyRight = 0;
   }
 
   if (dutyLeft >= 0)
@@ -972,8 +1045,8 @@ void encRightISR()
 //See brandsensor.h for description
 void encLeftISR()
 {
-   newStateL = stateL & 3;
-   if (digitalRead(ENC_A2)) newStateL |= 4;
+  newStateL = stateL & 3;
+  if (digitalRead(ENC_A2)) newStateL |= 4;
 	if (digitalRead(ENC_B2)) newStateL |= 8;
 		switch (newStateL) {
 			case 0: case 5: case 10: case 15:

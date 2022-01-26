@@ -97,6 +97,7 @@ float PID_OP::PIDUpdate(float _setpoint, float _measurement)
     I = 0.0;
     D = 0.0;
     u = 0.0;
+    //Serial.println("ERROR");
   }
 
   if (u > uMax) {
