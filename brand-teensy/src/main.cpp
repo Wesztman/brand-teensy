@@ -29,13 +29,16 @@
 #include <PID_OP.h>
 
 #include "ros.h"
+#include "ros/time.h"
 #include "geometry_msgs/Twist.h"
 #include "geometry_msgs/Point.h"
 #include "sensor_msgs/Range.h"
 #include "std_msgs/String.h"
 #include "std_msgs/Float32.h"
 #include "std_msgs/String.h"
-
+#include <tf/tf.h>
+#include <tf/transform_broadcaster.h>
+#include <nav_msgs/Odometry.h>
 
 //=================================================================
 //===                       PIN DEFINITION                     ====
@@ -190,7 +193,7 @@ PID_OP turnPID(Kp, Ki, Kd, tau, uMax, uMin, samplingTime);
 //Tried to use PID controll for the motors but the encdoer signal oscillating too
 //much and filter made it too slow.
 
-//### ROS ###
+//################# ROS ##################
 
 float x = 0.0;  //Linear velocity
 float z = 0.0;  //angular velocity
@@ -201,6 +204,28 @@ float kit = 0.09;
 float kdt = 0.001;
 char debugString[20];
 char tempString[10];
+
+float posX = 0.0;
+float posY = 0.0;
+float th = 0.0;
+float vx = 0.0;
+float vy = 0.0;
+float vth = 0.0;
+
+float dt = 0.0;
+float dPosX = 0.0;
+float dPosY = 0.0;
+float dTh = 0.0;
+
+unsigned long lastRosTime = 0;
+unsigned long rosDelay = 10;
+char base_link_id[] = "/base_link";
+char odom_id[] = "/odom";
+
+//ros::Time current_time = ros::Time::now();
+//ros::Time last_time = ros::Time::now();
+unsigned long sampleTime = 0;
+unsigned long sampleTimeOld = 0;
 
 ros::NodeHandle nh;
 
@@ -220,10 +245,15 @@ sensor_msgs::Range VL53L0X_1;
 std_msgs::Float32 angleRateDeg;
 std_msgs::Float32 angleRateRad;
 std_msgs::String debugData;
+nav_msgs::Odometry odom;
+tf::TransformBroadcaster odom_broadcaster;
+geometry_msgs::Quaternion odom_quat;
+geometry_msgs::TransformStamped odom_trans;
 
-ros::Publisher pub1("/angleRateDeg", &angleRateDeg);
-ros::Publisher pub2("/angleRateRad", &angleRateRad);
-ros::Publisher pub3("/debugData", &debugData);
+//ros::Publisher pub1("/angleRateDeg", &angleRateDeg);
+//ros::Publisher pub2("/angleRateRad", &angleRateRad);
+//ros::Publisher pub3("/debugData", &debugData);
+ros::Publisher odom_pub("/odom", &odom);
 
 ros::Subscriber<geometry_msgs::Twist> drive("cmd_vel", velCallback);
 ros::Subscriber<geometry_msgs::Point> PIDpara("PIDpara", pidVariables);
@@ -431,12 +461,14 @@ void setup()
   //---------------------- ROS -------------------------------
   
   nh.initNode();
-  //nh.advertise(test_topic);
+  odom_broadcaster.init(nh);
+
   nh.subscribe(drive);
-  nh.advertise(pub1);
-  nh.advertise(pub2);
-  nh.advertise(pub3);
+  //nh.advertise(pub1);
+  //nh.advertise(pub2);
+  //nh.advertise(pub3);
   nh.subscribe(PIDpara);
+  nh.advertise(odom_pub);
   
   //----------------------------------------------------------
 
@@ -454,7 +486,7 @@ void setup()
 
 void loop()
 {
-  nh.spinOnce();
+  //nh.spinOnce();
   
   //################### Distance sensors ####################
   //ultraDist = readUltraDist(trigPin, echoPin);
@@ -555,7 +587,59 @@ void loop()
     stopFlag = HIGH;
     startFlag = LOW;
   }
+  //################# ROS ##########################
+  //compute odometry in a typical way given the velocities of the robot
+  
+  sampleTime = micros() - sampleTimeOld;
+  sampleTimeOld = micros();
+  
+  vx = (leftVelocityFilt + rightVelocityFilt)/2;
+  
+  dt = (float)sampleTime / 1000000.0;
+  dPosX = (vx * cos(th)) * dt;
+  dPosY = (vx * sin(th)) * dt;
+  
+  posX += dPosX;
+  posY += dPosY;
+   
+  if( millis() - lastRosTime > rosDelay){
 
+    //send the transform
+    odom_trans.header.frame_id = odom_id;
+    odom_trans.child_frame_id = base_link_id;
+
+    odom_trans.transform.translation.x = posX; //posX
+    odom_trans.transform.translation.y = posY;  //posY
+    odom_trans.transform.translation.z = 0.0;
+    odom_trans.transform.rotation = tf::createQuaternionFromYaw(angleZrad); //tf;
+    odom_trans.header.stamp = nh.now();
+    
+    odom_broadcaster.sendTransform(odom_trans);
+   
+    odom.header.stamp = nh.now();
+    odom.header.frame_id = odom_id;
+    //set the position
+    odom.pose.pose.position.x = posX;
+    odom.pose.pose.position.y = posY;
+    odom.pose.pose.position.z = 0.0;
+    odom.pose.pose.orientation = tf::createQuaternionFromYaw(angleZrad);
+    //set the velocity
+    odom.child_frame_id = base_link_id;
+    odom.twist.twist.linear.x = vx;
+    odom.twist.twist.linear.y = vy;
+    odom.twist.twist.angular.z = filtAngularRateRad;
+
+    //pub1.publish(&angleRateDeg);  
+    //pub2.publish(&angleRateRad);
+    //pub3.publish(&debugData);
+    odom_pub.publish(&odom);
+
+    nh.spinOnce();
+    
+    lastRosTime = millis();
+  }
+  
+  
   //################# Communication ######################
   if (millis() - lastSerial > serialDelay)
   {
@@ -579,22 +663,25 @@ void loop()
 
   //   Serial.print(ultraDist);
     
+    /*
     Serial.print("R: ");
     Serial.print(dutyRight);
     Serial.print(" L: ");
     Serial.print(dutyLeft);
-     Serial.print("VelR: ");
-     Serial.print(rightEncTime);
-     Serial.print(",");
-     Serial.println(leftEncTime);
+    Serial.print("VelR: ");
+    Serial.print(rightEncTime);
+    Serial.print(",");
+    Serial.println(leftEncTime);
+    */
+    //Serial.print(testsample); 
+    //Serial.print(",");
+    //Serial.println(sampleTimeOld);
+    //Serial.print(" Vinkelhastighet: ");
      
-     //Serial.print(" Vinkelhastighet: ");
-     
-     //Serial.println(z);
+    //Serial.println(z);
 
-      pub1.publish(&angleRateDeg);  
-      pub2.publish(&angleRateRad);
-      pub3.publish(&debugData);
+    
+
 
   /*
    Serial.print("1: ");
@@ -657,7 +744,7 @@ void loop()
     }else if (z < 0)
     {
       zSign = -1;
-    }else if (z = 0)
+    }else if (z == 0)
     {
       zSign = 0;
     }
@@ -674,7 +761,7 @@ void loop()
   }
 
   //delay(10);
-
+  //nh.spinOnce();
   /*
   long newPosition = myEnc.read();
   if (newPosition != oldPosition) {
@@ -896,12 +983,12 @@ void calcAngle()
   angleZdeg = angleZ / 1000.0;
   angleZRelDeg = angleZRel / 1000.0;
 
-  //Limits the Angle to between 0-360
-  if (angleZdeg < 0)
+  //Limits the Angle to between -180 - 180 degrees
+  if (angleZdeg < -180)
   {
-    angleZdeg = 360 - angleZdeg;
-    angleZ = 360000 - angleZ;
-  }else if (angleZdeg > 360)
+    angleZdeg = angleZdeg + 360;
+    angleZ = angleZ + 360000;
+  }else if (angleZdeg > 180)
   {
     angleZdeg = angleZdeg - 360;
     angleZ = angleZ - 360000;
